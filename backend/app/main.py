@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 
-app = FastAPI(
-    title="MedTour Navigator API",
-    version="1.0.0"
-)
+from app.database.database import Base, engine
+from app.models.user import User
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="MedTour Navigator")
 
 @app.get("/")
 def root():
-    return {"message": "MedTour Navigator API is running!"}
+    return {"message": "Backend Connected Successfully"}
