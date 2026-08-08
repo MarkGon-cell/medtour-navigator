@@ -5,6 +5,10 @@ from app.database.database import get_db
 from app.schemas.user import UserCreate, UserResponse
 from app.services.user_service import create_user
 from app.models.user import User
+from fastapi.security import OAuth2PasswordRequestForm
+from app.schemas.user import UserLogin
+from app.services.user_service import authenticate_user
+from app.auth.jwt_handler import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -25,3 +29,29 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         email=user.email,
         password=user.password
     )
+
+@router.post("/login")
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    db_user = authenticate_user(
+        db,
+        form_data.username,
+        form_data.password
+    )
+
+    if not db_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+    access_token = create_access_token(
+        data={"sub": db_user.email}
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
