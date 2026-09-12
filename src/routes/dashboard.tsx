@@ -1,13 +1,22 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+
 import { DashboardSidebar } from "@/components/dashboard/Sidebar";
 import { SearchBar } from "@/components/site/SearchBar";
 import { NotificationDropdown } from "@/components/site/NotificationDropdown";
-import { HospitalCard } from "@/components/dashboard/HospitalCard";
+import {
+  HospitalCard,
+  HospitalCardSkeleton,
+} from "@/components/dashboard/HospitalCard";
+import { NearbyHospitalMap } from "@/components/dashboard/NearbyHospitalMap";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { mockAppointments, mockHospitals } from "@/lib/mock-data";
+
+import { mockAppointments } from "@/lib/mock-data";
+import type { Hospital } from "@/lib/hospital-data";
+import api from "@/lib/api";
 import {
   Ambulance,
   Search,
@@ -32,6 +41,27 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 function Dashboard() {
+const [hospitals, setHospitals] = useState<Hospital[]>([]);
+const [loadingHospitals, setLoadingHospitals] = useState(true);
+const [hospitalError, setHospitalError] = useState("");
+useEffect(() => {
+  const fetchHospitals = async () => {
+    try {
+      setLoadingHospitals(true);
+
+      const response = await api.get<Hospital[]>("/hospitals/");
+
+      setHospitals(response.data);
+    } catch (error) {
+      console.error("Failed to fetch hospitals:", error);
+      setHospitalError("Unable to load hospitals. Please try again.");
+    } finally {
+      setLoadingHospitals(false);
+    }
+  };
+
+  fetchHospitals();
+}, []); 
   return (
     <div className="flex min-h-screen bg-muted/30">
       <DashboardSidebar />
@@ -133,19 +163,57 @@ function Dashboard() {
               </Card>
             ))}
           </div>
+            <section>
+  <div className="mb-4">
+    <h2 className="text-lg font-semibold">
+      Find Hospitals Near You
+    </h2>
 
+    <p className="text-sm text-muted-foreground">
+      Locate hospitals around your current location.
+    </p>
+  </div>
+
+  <NearbyHospitalMap radiusKm={10} />
+</section>
           {/* Nearby hospitals */}
           <section>
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold">Nearby Hospitals</h2>
-                <p className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> Within 10 km of New Delhi</p>
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+  <MapPin className="h-3.5 w-3.5" />
+  Hospitals available in your area
+</p>
               </div>
               <Button variant="ghost" size="sm">View all <ArrowRight className="ml-1 h-4 w-4" /></Button>
             </div>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {mockHospitals.slice(0, 4).map((h) => <HospitalCard key={h.id} h={h} />)}
-            </div>
+           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+  {loadingHospitals ? (
+    <>
+      <HospitalCardSkeleton />
+      <HospitalCardSkeleton />
+      <HospitalCardSkeleton />
+    </>
+  ) : hospitalError ? (
+    <div className="col-span-full rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
+      <p className="text-sm text-destructive">{hospitalError}</p>
+    </div>
+  ) : hospitals.length === 0 ? (
+    <div className="col-span-full rounded-xl border border-border/70 bg-card p-6 text-center">
+      <p className="text-sm text-muted-foreground">
+        No hospitals found.
+      </p>
+    </div>
+  ) : (
+    hospitals.slice(0, 6).map((hospital) => (
+      <HospitalCard
+        key={hospital.id}
+        h={hospital}
+      />
+    ))
+  )}
+</div>
           </section>
 
           {/* Appointments */}

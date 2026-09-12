@@ -5,6 +5,8 @@ from app.database.database import Base, engine
 from app.models.user import User
 from app.auth.auth import router as auth_router
 from fastapi.middleware.cors import CORSMiddleware
+from app.models.hospital import Hospital
+from app.api.hospitals import router as hospital_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -24,6 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth_router)
+app.include_router(hospital_router)
 
 @app.get("/")
 def root():
