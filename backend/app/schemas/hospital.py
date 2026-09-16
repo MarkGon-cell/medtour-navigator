@@ -4,24 +4,27 @@ from typing import Optional
 
 class HospitalBase(BaseModel):
     name: str
-    city: str
+    city: Optional[str] = None
     state: str
-    address: str
+    district: Optional[str] = None
+    address: Optional[str] = None
+    pincode: Optional[str] = None
 
     latitude: float
     longitude: float
 
     specialties: Optional[str] = None
-    languages: Optional[str] = None
-
-    consultation_fee: Optional[float] = None
-    waiting_time: Optional[int] = None
+    facilities: Optional[str] = None
 
     emergency_available: bool = False
-    icu_available: bool = False
+    emergency_services: Optional[str] = None
+    ambulance_phone: Optional[str] = None
 
-    rating: Optional[float] = None
     phone: Optional[str] = None
+    website: Optional[str] = None
+
+    total_beds: Optional[int] = None
+    tariff_range: Optional[str] = None
 
 
 class HospitalCreate(HospitalBase):

@@ -45,23 +45,82 @@ const [hospitals, setHospitals] = useState<Hospital[]>([]);
 const [loadingHospitals, setLoadingHospitals] = useState(true);
 const [hospitalError, setHospitalError] = useState("");
 useEffect(() => {
-  const fetchHospitals = async () => {
-    try {
-      setLoadingHospitals(true);
-
-      const response = await api.get<Hospital[]>("/hospitals/");
-
-      setHospitals(response.data);
-    } catch (error) {
-      console.error("Failed to fetch hospitals:", error);
-      setHospitalError("Unable to load hospitals. Please try again.");
-    } finally {
+  const fetchNearbyHospitals = () => {
+    if (!navigator.geolocation) {
+      setHospitalError(
+        "Location services are not supported by this browser."
+      );
       setLoadingHospitals(false);
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          setLoadingHospitals(true);
+          setHospitalError("");
+
+          const latitude = position.coords.latitude;
+          const longitude = position.coords.longitude;
+
+          console.log("User location:", {
+            latitude,
+            longitude,
+          });
+
+          const response = await api.get<Hospital[]>(
+            "/hospitals/nearby",
+            {
+              params: {
+                latitude,
+                longitude,
+                radius_km: 10,
+                emergency: false,
+              },
+            }
+          );
+
+          console.log(
+            "Nearby hospitals:",
+            response.data
+          );
+
+          setHospitals(response.data);
+        } catch (error) {
+          console.error(
+            "Failed to fetch nearby hospitals:",
+            error
+          );
+
+          setHospitalError(
+            "Unable to load nearby hospitals. Please try again."
+          );
+        } finally {
+          setLoadingHospitals(false);
+        }
+      },
+      (error) => {
+        console.error(
+          "Location permission/error:",
+          error
+        );
+
+        setHospitalError(
+          "Location permission is required to find nearby hospitals."
+        );
+
+        setLoadingHospitals(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
   };
 
-  fetchHospitals();
-}, []); 
+  fetchNearbyHospitals();
+}, []);
   return (
     <div className="flex min-h-screen bg-muted/30">
       <DashboardSidebar />

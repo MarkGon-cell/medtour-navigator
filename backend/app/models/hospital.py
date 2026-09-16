@@ -7,23 +7,31 @@ class Hospital(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    name = Column(String, nullable=False)
-    city = Column(String, nullable=False, index=True)
-    state = Column(String, nullable=False)
+    # Basic information
+    name = Column(String, nullable=False, index=True)
+    city = Column(String, nullable=True, index=True)
+    state = Column(String, nullable=False, index=True)
+    district = Column(String, nullable=True, index=True)
+    address = Column(Text, nullable=True)
+    pincode = Column(String, nullable=True)
 
-    address = Column(Text, nullable=False)
+    # Geographic information
+    latitude = Column(Float, nullable=False, index=True)
+    longitude = Column(Float, nullable=False, index=True)
 
-    latitude = Column(Float, nullable=False)
-    longitude = Column(Float, nullable=False)
-
+    # Medical information
     specialties = Column(Text, nullable=True)
-    languages = Column(Text, nullable=True)
+    facilities = Column(Text, nullable=True)
 
-    consultation_fee = Column(Float, nullable=True)
-    waiting_time = Column(Integer, nullable=True)
-
+    # Emergency information
     emergency_available = Column(Boolean, default=False)
-    icu_available = Column(Boolean, default=False)
+    emergency_services = Column(Text, nullable=True)
+    ambulance_phone = Column(String, nullable=True)
 
-    rating = Column(Float, nullable=True)
+    # Contact
     phone = Column(String, nullable=True)
+    website = Column(String, nullable=True)
+
+    # Hospital information
+    total_beds = Column(Integer, nullable=True)
+    tariff_range = Column(Text, nullable=True)
