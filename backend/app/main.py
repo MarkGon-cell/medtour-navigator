@@ -7,6 +7,8 @@ from app.auth.auth import router as auth_router
 from fastapi.middleware.cors import CORSMiddleware
 from app.models.hospital import Hospital
 from app.api.hospitals import router as hospital_router
+from app.database.database import get_db
+from sqlalchemy.orm import Session
 
 Base.metadata.create_all(bind=engine)
 
@@ -35,8 +37,22 @@ def root():
     }
 
 @app.get("/profile")
-def profile(current_user: str = Depends(get_current_user)):
+def profile(
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter(
+        User.email == current_user
+    ).first()
+
+    if not user:
+        return {
+            "message": "User not found"
+        }
+
     return {
         "message": "Welcome!",
-        "user": current_user
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
     }

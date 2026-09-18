@@ -6,7 +6,7 @@ import { SearchBar } from "@/components/site/SearchBar";
 import { NotificationDropdown } from "@/components/site/NotificationDropdown";
 import {
   HospitalCard,
-  HospitalCardSkeleton,
+  
 } from "@/components/dashboard/HospitalCard";
 import { NearbyHospitalMap } from "@/components/dashboard/NearbyHospitalMap";
 import { Card, CardContent } from "@/components/ui/card";
@@ -40,10 +40,74 @@ export const Route = createFileRoute("/dashboard")({
   component: Dashboard,
 });
 
+async function getLocationName(
+  latitude: number,
+  longitude: number
+) {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`
+    );
+
+    if (!response.ok) {
+      throw new Error("Reverse geocoding failed");
+    }
+
+    const data = await response.json();
+    const address = data.address || {};
+
+    const city =
+      address.city ||
+      address.town ||
+      address.municipality ||
+      address.village ||
+      address.suburb;
+
+    const state = address.state;
+
+    if (city && state) {
+      return `${city}, ${state}`;
+    }
+
+    if (city) {
+      return city;
+    }
+
+    if (state) {
+      return state;
+    }
+
+    return "your current location";
+  } catch (error) {
+    console.error("Failed to detect location name:", error);
+    return "your current location";
+  }
+}
+
 function Dashboard() {
 const [hospitals, setHospitals] = useState<Hospital[]>([]);
+const [userLocation, setUserLocation] = useState("your current location");
 const [loadingHospitals, setLoadingHospitals] = useState(true);
 const [hospitalError, setHospitalError] = useState("");
+const [userName, setUserName] = useState("User");
+useEffect(() => {
+  const fetchProfile = async () => {
+    try {
+      const response = await api.get("/profile");
+
+      setUserName(
+        response.data.full_name || "User"
+      );
+    } catch (error) {
+      console.error(
+        "Failed to load user profile:",
+        error
+      );
+    }
+  };
+
+  fetchProfile();
+}, []);
 useEffect(() => {
   const fetchNearbyHospitals = () => {
     if (!navigator.geolocation) {
@@ -63,10 +127,21 @@ useEffect(() => {
           const latitude = position.coords.latitude;
           const longitude = position.coords.longitude;
 
+          setUserLocation(
+            `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+        );
+
           console.log("User location:", {
             latitude,
             longitude,
           });
+
+          const locationName = await getLocationName(
+            latitude,
+            longitude
+          );
+
+          setUserLocation(locationName);
 
           const response = await api.get<Hospital[]>(
             "/hospitals/nearby",
@@ -121,18 +196,24 @@ useEffect(() => {
 
   fetchNearbyHospitals();
 }, []);
+const userInitials = userName
+  .split(" ")
+  .map((name) => name[0])
+  .join("")
+  .slice(0, 2)
+  .toUpperCase();
   return (
     <div className="flex min-h-screen bg-muted/30">
       <DashboardSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Top bar */}
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6">
+        <header className="sticky top-0 z-[2000] flex h-16 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6">
           <div className="flex-1 max-w-xl">
             <SearchBar placeholder="Search hospitals, specialties, symptoms…" />
           </div>
           <NotificationDropdown />
           <Avatar className="h-9 w-9">
-            <AvatarFallback className="bg-primary text-primary-foreground">AS</AvatarFallback>
+            <AvatarFallback className="bg-primary text-primary-foreground">{userInitials}</AvatarFallback>
           </Avatar>
         </header>
 
@@ -142,9 +223,9 @@ useEffect(() => {
             <Card className="overflow-hidden rounded-2xl border-0 shadow-soft lg:col-span-2">
               <div className="relative bg-gradient-hero p-6 text-white sm:p-8">
                 <p className="text-sm text-white/80">Welcome back</p>
-                <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Namaste, Aarav 👋</h1>
+                <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Namaste, {userName} 👋</h1>
                 <p className="mt-2 max-w-lg text-sm text-white/85">
-                  You're in <strong>New Delhi</strong>. 24 verified hospitals nearby, all systems ready.
+                  You're near {userLocation}. {hospitals.length} hospitals nearby.
                 </p>
                 <div className="mt-5 flex flex-wrap gap-2">
                   <Button variant="secondary" size="sm" className="text-primary"><Search className="mr-1 h-4 w-4" />Find care</Button>
@@ -239,21 +320,24 @@ useEffect(() => {
           <section>
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Nearby Hospitals</h2>
+                <h2 className="text-lg font-semibold">
+                  Nearby Hospitals
+                </h2>
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
   <MapPin className="h-3.5 w-3.5" />
   Hospitals available in your area
 </p>
               </div>
-              <Button variant="ghost" size="sm">View all <ArrowRight className="ml-1 h-4 w-4" /></Button>
+              <Link to="/hospitals">
+  <Button variant="ghost" size="sm">
+    View all
+    <ArrowRight className="ml-1 h-4 w-4" />
+  </Button>
+</Link>
             </div>
            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
   {loadingHospitals ? (
-    <>
-      <HospitalCardSkeleton />
-      <HospitalCardSkeleton />
-      <HospitalCardSkeleton />
-    </>
+    <div className="h-48 animate-pulse rounded-2xl bg-muted" />
   ) : hospitalError ? (
     <div className="col-span-full rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
       <p className="text-sm text-destructive">{hospitalError}</p>
@@ -267,8 +351,8 @@ useEffect(() => {
   ) : (
     hospitals.slice(0, 6).map((hospital) => (
       <HospitalCard
-        key={hospital.id}
-        h={hospital}
+       key={hospital.id}
+      hospital={hospital}
       />
     ))
   )}

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as HospitalsRouteImport } from './routes/hospitals'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as HospitalDetailsHospitalIdRouteImport } from './routes/hospital-details.$hospitalId'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HospitalsRoute = HospitalsRouteImport.update({
+  id: '/hospitals',
+  path: '/hospitals',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -45,6 +51,7 @@ const HospitalDetailsHospitalIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/hospitals': typeof HospitalsRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/hospital-details/$hospitalId': typeof HospitalDetailsHospitalIdRoute
@@ -52,6 +59,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/hospitals': typeof HospitalsRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/hospital-details/$hospitalId': typeof HospitalDetailsHospitalIdRoute
@@ -60,6 +68,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/hospitals': typeof HospitalsRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/hospital-details/$hospitalId': typeof HospitalDetailsHospitalIdRoute
@@ -69,6 +78,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/dashboard'
+    | '/hospitals'
     | '/login'
     | '/register'
     | '/hospital-details/$hospitalId'
@@ -76,6 +86,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/hospitals'
     | '/login'
     | '/register'
     | '/hospital-details/$hospitalId'
@@ -83,6 +94,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/dashboard'
+    | '/hospitals'
     | '/login'
     | '/register'
     | '/hospital-details/$hospitalId'
@@ -91,6 +103,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
+  HospitalsRoute: typeof HospitalsRoute
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
   HospitalDetailsHospitalIdRoute: typeof HospitalDetailsHospitalIdRoute
@@ -110,6 +123,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/hospitals': {
+      id: '/hospitals'
+      path: '/hospitals'
+      fullPath: '/hospitals'
+      preLoaderRoute: typeof HospitalsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -139,6 +159,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
+  HospitalsRoute: HospitalsRoute,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
   HospitalDetailsHospitalIdRoute: HospitalDetailsHospitalIdRoute,
