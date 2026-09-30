@@ -1,25 +1,25 @@
-Frontend 
-# Navigate
+# Frontend 
+## Navigate
 cd medtour-navigator
 
-# Install dependencies
+## Install dependencies
 npm install
 
-# Start frontend
+## Start frontend
 npm run dev
 
-Backend 
-# Navigate 
+# Backend 
+## Navigate 
 cd medtour-navigator/backend
 
-# Create virtual environment 
+## Create virtual environment 
 python -m venv venv
 
-# Activate virtual environment - Windows
+## Activate virtual environment - Windows
 venv\Scripts\activate
 
-# Install dependencies
+## Install dependencies
 pip install -r requirements.txt
 
-# Start FastAPI backend
+## Start FastAPI backend
 uvicorn app.main:app --reload
