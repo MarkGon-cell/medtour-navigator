@@ -1,52 +1,24 @@
 import os
 import re
-
 import pandas as pd
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+
+from app.database.database import DATABASE_URL
 
 
 # ---------------------------------------------------------
-# Configuration
+# Paths
 # ---------------------------------------------------------
 
-load_dotenv()
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = os.path.dirname(SCRIPT_DIR)
+PROJECT_ROOT = os.path.dirname(BACKEND_DIR)
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    raise ValueError(
-        "DATABASE_URL not found in backend/.env"
-    )
-
-CSV_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "..",
-    "hospital_directory.csv",
-)
-
-CSV_PATH = os.path.abspath(CSV_PATH)
+CSV_PATH = os.path.join(PROJECT_ROOT, "hospital_directory.csv")
 
 
 # ---------------------------------------------------------
-# Load CSV
-# ---------------------------------------------------------
-
-print("Loading hospital dataset...")
-
-df = pd.read_csv(
-    CSV_PATH,
-    low_memory=False,
-)
-
-print(
-    f"Original records: {len(df)}"
-)
-
-
-# ---------------------------------------------------------
-# Helper functions
+# Helpers
 # ---------------------------------------------------------
 
 def clean_text(value):
@@ -55,74 +27,40 @@ def clean_text(value):
 
     value = str(value).strip()
 
-    if not value:
-        return None
-
-    if value.lower() in {
-        "0",
-        "0.0",
-        "0.00",
-        "nan",
-        "none",
-        "null",
-    }:
+    if not value or value.lower() in {"nan", "none", "null", "0", "0.0",}:
         return None
 
     return value
 
 
-def parse_coordinates(value):
-    """
-    Convert:
-
-        19.0760, 72.8777
-
-    into:
-
-        (19.0760, 72.8777)
-
-    Invalid values return None.
-    """
-
-    if pd.isna(value):
-        return None
-
-    value = str(value).strip()
-
-    if not value:
-        return None
-
-    match = re.match(
-        r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$",
-        value,
-    )
-
-    if not match:
-        return None
-
-    latitude = float(match.group(1))
-    longitude = float(match.group(2))
-
-    # India geographic sanity check.
-    #
-    # These bounds are deliberately broad.
-    if not (
-        6 <= latitude <= 38
-        and 68 <= longitude <= 98
-    ):
-        return None
-
-    return latitude, longitude
-
-
-def parse_integer(value):
+def clean_int(value):
     if pd.isna(value):
         return None
 
     try:
-        number = float(str(value).strip())
+        value = str(value).strip()
 
-        if number < 0:
+        if not value or value.lower() in {
+            "nan",
+            "none",
+            "null",
+            "0",
+            "0.0",
+        }:
+            return None
+
+        # Remove commas and other common formatting characters
+        value = value.replace(",", "")
+
+        number = float(value)
+
+        if number <= 0:
+            return None
+
+        # Sanity check for hospital directory data.
+        # A single hospital having more than 10,000 beds
+        # is treated as invalid directory data.
+        if number > 10000:
             return None
 
         return int(number)
@@ -131,133 +69,98 @@ def parse_integer(value):
         return None
 
 
-def parse_emergency(value):
+def parse_coordinates(value):
+    """
+    Convert Location_Coordinates into latitude/longitude.
+    Expected formats include:
+    '19.358466,72.788650'
+    """
+
     if pd.isna(value):
-        return False
+        return None, None
 
-    value = str(value).strip().lower()
+    value = str(value).strip()
 
-    return value in {
-        "yes",
-        "y",
-        "true",
-        "1",
-        "available",
-        "24x7",
-        "24/7",
-        "24 hours",
-        "emergency services 24 hours",
-    }
+    numbers = re.findall(r"-?\d+(?:\.\d+)?", value)
+
+    if len(numbers) < 2:
+        return None, None
+
+    try:
+        latitude = float(numbers[0])
+        longitude = float(numbers[1])
+
+        # Valid approximate bounds for India
+        if not (6 <= latitude <= 38):
+            return None, None
+
+        if not (68 <= longitude <= 98):
+            return None, None
+
+        return latitude, longitude
+
+    except ValueError:
+        return None, None
+
+
+# ---------------------------------------------------------
+# Load CSV
+# ---------------------------------------------------------
+
+print(f"Loading CSV: {CSV_PATH}")
+
+df = pd.read_csv(CSV_PATH)
+
+print(f"Original records: {len(df)}")
 
 
 # ---------------------------------------------------------
 # Parse coordinates
 # ---------------------------------------------------------
 
-print("Cleaning coordinates...")
+coordinates = df["Location_Coordinates"].apply(parse_coordinates)
 
-coordinates = df[
-    "Location_Coordinates"
-].apply(parse_coordinates)
+df["latitude"] = coordinates.apply(lambda x: x[0])
+df["longitude"] = coordinates.apply(lambda x: x[1])
 
-df["latitude"] = coordinates.apply(
-    lambda x: x[0] if x else None
+
+# Remove hospitals without valid coordinates
+df = df.dropna(subset=["latitude", "longitude"]).copy()
+
+print(f"Records with valid coordinates: {len(df)}")
+
+
+# ---------------------------------------------------------
+# Clean important fields
+# ---------------------------------------------------------
+
+df["Hospital_Name"] = df["Hospital_Name"].apply(clean_text)
+df["State"] = df["State"].apply(clean_text)
+df["District"] = df["District"].apply(clean_text)
+
+df["Town"] = df["Town"].apply(clean_text)
+df["Subtown"] = df["Subtown"].apply(clean_text)
+df["Village"] = df["Village"].apply(clean_text)
+
+df["Address_Original_First_Line"] = (
+    df["Address_Original_First_Line"].apply(clean_text)
 )
 
-df["longitude"] = coordinates.apply(
-    lambda x: x[1] if x else None
-)
+df["Pincode"] = df["Pincode"].apply(clean_text)
+
+# Remove records without basic identity
+df = df.dropna(subset=["Hospital_Name", "State"]).copy()
+
+print(f"Records after basic validation: {len(df)}")
 
 
 # ---------------------------------------------------------
-# Remove records without valid coordinates
+# Determine city
 # ---------------------------------------------------------
 
-before = len(df)
-
-df = df.dropna(
-    subset=[
-        "latitude",
-        "longitude",
-    ]
-).copy()
-
-print(
-    f"Removed {before - len(df)} records without valid coordinates."
-)
-
-print(
-    f"Records with valid coordinates: {len(df)}"
-)
-
-
-# ---------------------------------------------------------
-# Clean important columns
-# ---------------------------------------------------------
-
-df["Hospital_Name"] = df[
-    "Hospital_Name"
-].apply(clean_text)
-
-df["State"] = df[
-    "State"
-].apply(clean_text)
-
-df["District"] = df[
-    "District"
-].apply(clean_text)
-
-df["Address_Original_First_Line"] = df[
-    "Address_Original_First_Line"
-].apply(clean_text)
-
-df["Pincode"] = df[
-    "Pincode"
-].apply(clean_text)
-
-df["Specialties"] = df[
-    "Specialties"
-].apply(clean_text)
-
-df["Facilities"] = df[
-    "Facilities"
-].apply(clean_text)
-
-df["Emergency_Services"] = df[
-    "Emergency_Services"
-].apply(clean_text)
-
-df["Ambulance_Phone_No"] = df[
-    "Ambulance_Phone_No"
-].apply(clean_text)
-
-df["Telephone"] = df[
-    "Telephone"
-].apply(clean_text)
-
-df["Website"] = df[
-    "Website"
-].apply(clean_text)
-
-df["Tariff_Range"] = df[
-    "Tariff_Range"
-].apply(clean_text)
-
-
-# ---------------------------------------------------------
-# City
-# ---------------------------------------------------------
-
-def choose_city(row):
-    for column in [
-        "Town",
-        "Subtown",
-        "Village",
-        "District",
-    ]:
-        value = clean_text(
-            row.get(column)
-        )
+def get_city(row):
+    for field in ["Town", "Subtown", "Village", "District"]:
+        value = clean_text(row.get(field))
 
         if value:
             return value
@@ -265,146 +168,176 @@ def choose_city(row):
     return None
 
 
-df["city"] = df.apply(
-    choose_city,
-    axis=1,
+df["city"] = df.apply(get_city, axis=1)
+
+
+# ---------------------------------------------------------
+# Emergency information
+# ---------------------------------------------------------
+
+def is_emergency_available(value):
+    if pd.isna(value):
+        return False
+
+    value = str(value).strip().lower()
+
+    if not value:
+        return False
+
+    return (
+        "24 hours" in value
+        or "emergency service" in value
+        or value in {"yes", "available", "true", "1"}
+    )
+
+
+df["emergency_available"] = (
+    df["Emergency_Services"]
+    .apply(is_emergency_available)
 )
 
 
 # ---------------------------------------------------------
-# Emergency
-# ---------------------------------------------------------
-
-df["emergency_available"] = df[
-    "Emergency_Services"
-].apply(parse_emergency)
-
-
-# ---------------------------------------------------------
-# Beds
-# ---------------------------------------------------------
-
-df["total_beds"] = df[
-    "Total_Num_Beds"
-].apply(parse_integer)
-
-
-# ---------------------------------------------------------
-# Remove records without hospital names/states
-# ---------------------------------------------------------
-
-before = len(df)
-
-df = df.dropna(
-    subset=[
-        "Hospital_Name",
-        "State",
-    ]
-).copy()
-
-print(
-    f"Removed {before - len(df)} records without name/state."
-)
-
-
-# ---------------------------------------------------------
-# Remove exact duplicate hospital records
-# ---------------------------------------------------------
-
-before = len(df)
-
-df = df.drop_duplicates(
-    subset=[
-        "Hospital_Name",
-        "latitude",
-        "longitude",
-    ]
-).copy()
-
-print(
-    f"Removed {before - len(df)} duplicate records."
-)
-
-print(
-    f"Final records to import: {len(df)}"
-)
-
-
-# ---------------------------------------------------------
-# Prepare PostgreSQL dataframe
+# Convert hospital data to database format
 # ---------------------------------------------------------
 
 hospital_df = pd.DataFrame({
-    "name": df["Hospital_Name"],
-    "city": df["city"],
-    "state": df["State"],
-    "district": df["District"],
-    "address": df[
-        "Address_Original_First_Line"
-    ],
-    "pincode": df["Pincode"],
+    "name": df["Hospital_Name"].apply(clean_text),
+
+    "category": df["Hospital_Category"].apply(clean_text),
+    "care_type": df["Hospital_Care_Type"].apply(clean_text),
+    "discipline": df["Discipline_Systems_of_Medicine"].apply(clean_text),
+
+    "city": df["city"].apply(clean_text),
+    "state": df["State"].apply(clean_text),
+    "district": df["District"].apply(clean_text),
+
+    "subdistrict": df["Subdistrict"].apply(clean_text),
+
+    "address": df["Address_Original_First_Line"].apply(clean_text),
+    "pincode": df["Pincode"].apply(clean_text),
 
     "latitude": df["latitude"],
     "longitude": df["longitude"],
 
-    "specialties": df["Specialties"],
-    "facilities": df["Facilities"],
+    "specialties": df["Specialties"].apply(clean_text),
+    "facilities": df["Facilities"].apply(clean_text),
+    "miscellaneous_facilities": (
+        df["Miscellaneous_Facilities"].apply(clean_text)
+    ),
 
-    "emergency_available":
-        df["emergency_available"],
+    "emergency_available": df["emergency_available"],
 
-    "emergency_services":
-        df["Emergency_Services"],
+    "emergency_services": (
+        df["Emergency_Services"].apply(clean_text)
+    ),
 
-    "ambulance_phone":
-        df["Ambulance_Phone_No"],
+    "emergency_phone": (
+        df["Emergency_Num"].apply(clean_text)
+    ),
 
-    "phone": df["Telephone"],
-    "website": df["Website"],
+    "ambulance_phone": (
+        df["Ambulance_Phone_No"].apply(clean_text)
+    ),
 
-    "total_beds":
-        df["total_beds"],
+    "bloodbank_phone": (
+        df["Bloodbank_Phone_No"].apply(clean_text)
+    ),
 
-    "tariff_range":
-        df["Tariff_Range"],
+    "phone": (
+        df["Telephone"].apply(clean_text)
+    ),
+
+    "mobile": (
+        df["Mobile_Number"].apply(clean_text)
+    ),
+
+    "tollfree": (
+        df["Tollfree"].apply(clean_text)
+    ),
+
+    "helpline": (
+        df["Helpline"].apply(clean_text)
+    ),
+
+    "website": (
+        df["Website"].apply(clean_text)
+    ),
+
+    "email": (
+        df["Hospital_Primary_Email_Id"].apply(clean_text)
+    ),
+
+    "total_beds": (
+        df["Total_Num_Beds"].apply(clean_int)
+    ),
+
+    "private_wards": (
+        df["Number_Private_Wards"].apply(clean_int)
+    ),
+
+    "economically_weaker_beds": (
+        df["Num_Bed_for_Eco_Weaker_Sec"].apply(clean_int)
+    ),
+
+    "doctors": (
+        df["Number_Doctor"].apply(clean_int)
+    ),
+
+    "medical_consultants": (
+        df["Num_Mediconsultant_or_Expert"].apply(clean_int)
+    ),
+
+    "established_year": (
+        df["Establised_Year"].apply(clean_int)
+    ),
+
+    "accreditation": (
+        df["Accreditation"].apply(clean_text)
+    ),
+
+    "registration_number": (
+        df["Hospital_Regis_Number"].apply(clean_text)
+    ),
+
+    "empanelment": (
+        df["Empanelment_or_Collaboration_with"].apply(clean_text)
+    ),
+
+    "tariff_range": (
+        df["Tariff_Range"].apply(clean_text)
+    ),
 })
 
 
 # ---------------------------------------------------------
-# PostgreSQL
+# Remove exact duplicates
 # ---------------------------------------------------------
 
-print("Connecting to PostgreSQL...")
+before_duplicates = len(hospital_df)
 
-engine = create_engine(
-    DATABASE_URL
-)
+hospital_df = hospital_df.drop_duplicates(
+    subset=["name", "latitude", "longitude"]
+).reset_index(drop=True)
 
+duplicates_removed = before_duplicates - len(hospital_df)
 
-# ---------------------------------------------------------
-# Replace existing hospitals table
-# ---------------------------------------------------------
-
-print(
-    "Replacing existing hospital table..."
-)
-
-with engine.begin() as connection:
-
-    connection.execute(
-        text(
-            "DROP TABLE IF EXISTS hospitals CASCADE"
-        )
-    )
+print(f"Removed {duplicates_removed} duplicate records.")
+print(f"Final records to import: {len(hospital_df)}")
 
 
 # ---------------------------------------------------------
-# Import
+# PostgreSQL connection
 # ---------------------------------------------------------
 
-print(
-    "Importing hospitals into PostgreSQL..."
-)
+engine = create_engine(DATABASE_URL)
+
+
+# ---------------------------------------------------------
+# Replace hospitals table
+# ---------------------------------------------------------
+
+print("Replacing hospitals table...")
 
 hospital_df.to_sql(
     "hospitals",
@@ -412,13 +345,11 @@ hospital_df.to_sql(
     if_exists="replace",
     index=True,
     index_label="id",
-    chunksize=1000,
 )
 
-print(
-    "Hospital import completed successfully."
-)
 
 print(
-    f"Imported {len(hospital_df)} hospital records."
+    f"Successfully imported {len(hospital_df)} hospital records."
 )
+
+print("Hospital import completed successfully.")

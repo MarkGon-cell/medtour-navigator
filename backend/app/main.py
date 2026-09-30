@@ -9,6 +9,16 @@ from app.models.hospital import Hospital
 from app.api.hospitals import router as hospital_router
 from app.database.database import get_db
 from sqlalchemy.orm import Session
+from app.models.hospital import Hospital
+from app.models.hospital_availability import HospitalAvailability
+from app.models.hospital_waiting_prediction import HospitalWaitingPrediction
+from app.api.waiting_prediction import router as waiting_prediction_router
+from app.models.hospital_waiting_observation import HospitalWaitingObservation
+from app.api.waiting_observations import router as waiting_observations_router
+from app.models.appointment import Appointment
+from app.api.appointments import router as appointments_router
+from app.models.hospital_queue_status import HospitalQueueStatus
+from app.api.hospital_queue import router as hospital_queue_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -29,6 +39,10 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(hospital_router)
+app.include_router(waiting_prediction_router)
+app.include_router(waiting_observations_router)
+app.include_router(appointments_router)
+app.include_router(hospital_queue_router)
 
 @app.get("/")
 def root():
