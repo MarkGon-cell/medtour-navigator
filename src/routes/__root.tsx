@@ -76,7 +76,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { name: "viewport", content: "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" },
       { title: "MedTour — AI Healthcare Navigation for Travellers in India" },
       { name: "description", content: "Find verified hospitals, AI-powered recommendations and 24/7 emergency SOS for tourists across India." },
       { name: "author", content: "MedTour" },

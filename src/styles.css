@@ -74,8 +74,8 @@
   --emergency: oklch(0.62 0.23 20);
   --emergency-foreground: oklch(0.99 0.005 220);
 
-  --gradient-hero: linear-gradient(135deg, oklch(0.55 0.16 240) 0%, oklch(0.72 0.14 195) 60%, oklch(0.78 0.13 165) 100%);
-  --gradient-card: linear-gradient(135deg, oklch(0.98 0.01 220) 0%, oklch(0.96 0.03 195) 100%);
+  
+  
   --shadow-soft: 0 4px 20px -8px oklch(0.55 0.16 240 / 0.15);
   --shadow-elevated: 0 20px 60px -20px oklch(0.55 0.16 240 / 0.25);
 
@@ -125,12 +125,6 @@
   --sidebar-ring: oklch(0.70 0.15 220);
 }
 
-@utility bg-gradient-hero {
-  background-image: var(--gradient-hero);
-}
-@utility bg-gradient-card {
-  background-image: var(--gradient-card);
-}
 @utility shadow-soft {
   box-shadow: var(--shadow-soft);
 }

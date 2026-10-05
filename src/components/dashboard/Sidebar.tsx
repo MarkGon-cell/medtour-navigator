@@ -22,7 +22,7 @@ const items = [
   { to: "/dashboard", label: "Appointments", icon: Calendar, hash: "appts" },
 ];
 
-export function DashboardSidebar() {
+export function DashboardSidebar({ className = "" }) {
   const pathname = useRouterState({
     select: (s) => s.location.pathname,
   });
@@ -34,7 +34,8 @@ export function DashboardSidebar() {
       className={cn(
         "hidden shrink-0 border-r border-sidebar-border bg-sidebar md:flex md:flex-col",
         "transition-all duration-300",
-        collapsed ? "w-20" : "w-64"
+        collapsed ? "w-20" : "w-64",
+        className
       )}
     >
       {/* HEADER */}
@@ -48,7 +49,7 @@ export function DashboardSidebar() {
       >
         {!collapsed && (
           <div className="flex items-center gap-2">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-hero text-white">
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground">
               <HeartPulse className="h-5 w-5" />
             </div>
 
@@ -59,7 +60,7 @@ export function DashboardSidebar() {
         )}
 
         {collapsed && (
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-hero text-white">
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground">
             <HeartPulse className="h-5 w-5" />
           </div>
         )}

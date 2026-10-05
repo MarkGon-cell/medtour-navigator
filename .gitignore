@@ -30,3 +30,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+backend/pgdata/*
+backend/sos_logs/*

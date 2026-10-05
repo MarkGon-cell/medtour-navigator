@@ -56,20 +56,20 @@ function Landing() {
 
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-hero opacity-[0.08]" />
+        <div className="absolute inset-0 bg-primary opacity-[0.08]" />
         <div className="relative mx-auto grid max-w-7xl gap-12 px-4 py-20 sm:px-6 md:grid-cols-2 md:py-28">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground shadow-soft">
               <Sparkles className="h-3.5 w-3.5 text-primary" /> AI-powered healthcare navigator
             </div>
             <h1 className="mt-5 text-4xl font-bold leading-tight tracking-tight sm:text-5xl md:text-6xl">
-              Healthcare that travels with you across <span className="bg-gradient-hero bg-clip-text text-transparent">India</span>.
+              Healthcare that travels with you across <span className="bg-primary bg-clip-text text-transparent">India</span>.
             </h1>
             <p className="mt-5 max-w-xl text-lg text-muted-foreground">
               Find verified hospitals, get AI-powered recommendations, and reach emergency care in minutes — designed for domestic and international tourists.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Button asChild size="lg" className="bg-gradient-hero text-white shadow-elevated hover:opacity-95">
+              <Button asChild size="lg" className="bg-primary text-primary-foreground shadow-elevated hover:opacity-95">
                 <Link to="/register">Get Started <ArrowRight className="ml-1 h-4 w-4" /></Link>
               </Button>
               <Button asChild size="lg" variant="outline">
@@ -84,7 +84,7 @@ function Landing() {
           </div>
 
           <div className="relative">
-            <div className="absolute -inset-6 bg-gradient-hero opacity-20 blur-3xl" />
+            <div className="absolute -inset-6 bg-primary opacity-20 blur-3xl" />
             <Card className="relative overflow-hidden rounded-3xl border-border/70 shadow-elevated">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
@@ -94,7 +94,7 @@ function Landing() {
                   </div>
                   <div className="rounded-xl bg-emergency px-3 py-1 text-xs font-semibold text-emergency-foreground">SOS Ready</div>
                 </div>
-                <div className="mt-4 aspect-[4/3] rounded-2xl bg-gradient-card p-4">
+                <div className="mt-4 aspect-[4/3] rounded-2xl bg-card p-4">
                   <div className="flex h-full w-full items-center justify-center rounded-xl border border-dashed border-primary/30 bg-background/60">
                     <div className="text-center">
                       <MapPin className="mx-auto h-10 w-10 text-primary" />
@@ -129,7 +129,7 @@ function Landing() {
           {features.map((f) => (
             <Card key={f.title} className="group rounded-2xl border-border/70 transition-all hover:-translate-y-0.5 hover:shadow-elevated">
               <CardContent className="p-6">
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-hero text-white shadow-soft">
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary text-primary-foreground shadow-soft">
                   <f.icon className="h-5 w-5" />
                 </div>
                 <h3 className="mt-4 text-lg font-semibold">{f.title}</h3>
@@ -182,7 +182,7 @@ function Landing() {
       {/* Contact CTA */}
       <section className="mx-auto max-w-7xl px-4 pb-20 sm:px-6">
         <Card className="overflow-hidden rounded-3xl border-0 shadow-elevated">
-          <div className="relative bg-gradient-hero p-10 text-white sm:p-14">
+          <div className="relative bg-primary p-10 text-white sm:p-14">
             <h3 className="max-w-2xl text-3xl font-bold sm:text-4xl">Ready to travel India with a doctor in your pocket?</h3>
             <p className="mt-3 max-w-xl text-white/85">Join thousands of tourists who use MedTour for stress-free healthcare on the road.</p>
             <div className="mt-6 flex flex-wrap gap-3">
