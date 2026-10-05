@@ -22,4 +22,4 @@ venv\Scripts\activate
 pip install -r requirements.txt
 
 ## Start FastAPI backend
-uvicorn app.main:app --reload
+full_file_path/run_server.bat
