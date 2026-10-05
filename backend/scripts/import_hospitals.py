@@ -1,7 +1,7 @@
 import os
 import re
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 from app.database.database import DATABASE_URL
 
@@ -337,7 +337,15 @@ engine = create_engine(DATABASE_URL)
 # Replace hospitals table
 # ---------------------------------------------------------
 
-print("Replacing hospitals table...")
+print("Dropping existing tables and replacing hospitals table...")
+
+with engine.begin() as conn:
+    conn.execute(text("DROP TABLE IF EXISTS appointments CASCADE;"))
+    conn.execute(text("DROP TABLE IF EXISTS hospital_availability CASCADE;"))
+    conn.execute(text("DROP TABLE IF EXISTS hospital_waiting_predictions CASCADE;"))
+    conn.execute(text("DROP TABLE IF EXISTS hospital_waiting_observations CASCADE;"))
+    conn.execute(text("DROP TABLE IF EXISTS hospital_queue_status CASCADE;"))
+    conn.execute(text("DROP TABLE IF EXISTS hospitals CASCADE;"))
 
 hospital_df.to_sql(
     "hospitals",
@@ -347,9 +355,11 @@ hospital_df.to_sql(
     index_label="id",
 )
 
+with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE hospitals ADD PRIMARY KEY (id);"))
 
 print(
-    f"Successfully imported {len(hospital_df)} hospital records."
+    f"Successfully imported {len(hospital_df)} hospital records with Primary Key."
 )
 
 print("Hospital import completed successfully.")

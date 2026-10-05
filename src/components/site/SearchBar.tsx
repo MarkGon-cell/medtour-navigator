@@ -132,7 +132,7 @@ export function SearchBar({
 
       <Button
         onClick={handleSearch}
-        className="bg-gradient-hero text-white hover:opacity-95"
+        className="bg-primary text-primary-foreground hover:opacity-95"
       >
         Search
       </Button>

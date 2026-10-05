@@ -7,7 +7,7 @@ export function Footer() {
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-4">
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-hero text-white">
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground">
               <HeartPulse className="h-5 w-5" />
             </div>
             <span className="text-lg font-bold">MedTour</span>

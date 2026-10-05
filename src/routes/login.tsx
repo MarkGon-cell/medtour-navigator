@@ -75,7 +75,7 @@ function LoginPage() {
   return (
     <div className="min-h-screen grid md:grid-cols-2">
       {/* Left Side */}
-      <div className="relative hidden bg-gradient-hero p-10 text-white md:flex md:flex-col md:justify-between">
+      <div className="relative hidden bg-primary p-10 text-white md:flex md:flex-col md:justify-between">
         <Link to="/" className="flex items-center gap-2">
           <div className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 backdrop-blur">
             <HeartPulse className="h-5 w-5" />
@@ -170,7 +170,7 @@ function LoginPage() {
 
               <Button
                 type="submit"
-                className="w-full bg-gradient-hero text-white hover:opacity-95"
+                className="w-full bg-primary text-primary-foreground hover:opacity-95"
                 size="lg"
                 disabled={loading}
               >

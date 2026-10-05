@@ -1,4 +1,4 @@
-import { MapPin, Navigation, Phone, BedDouble, Siren } from "lucide-react";
+import { MapPin, Navigation, Phone, BedDouble, Siren, Sparkles } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 
 type Hospital = {
@@ -21,6 +21,8 @@ type Hospital = {
   total_beds: number | null;
   tariff_range: string | null;
   distance_km?: number;
+  ai_match_score?: number;
+  ai_match_reason?: string;
 };
 
 interface HospitalCardProps {
@@ -31,7 +33,7 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
   const navigate = useNavigate();
 
   const handleNavigate = () => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${hospital.latitude},${hospital.longitude}`;
+    const url = `https://www.openstreetmap.org/?mlat=${hospital.latitude}&mlon=${hospital.longitude}#map=16/${hospital.latitude}/${hospital.longitude}`;
     window.open(url, "_blank");
   };
 
@@ -45,14 +47,21 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
     <div className="group rounded-2xl border border-border bg-card p-5 shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h3 className="text-base font-semibold leading-tight text-foreground">
-            {hospital.name}
-          </h3>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-base font-semibold leading-tight text-foreground">
+              {hospital.name}
+            </h3>
+            {hospital.ai_match_score !== undefined && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-700/60 px-2.5 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                <Sparkles className="h-3 w-3" />
+                {hospital.ai_match_score}% AI Match
+              </span>
+            )}
+          </div>
 
           <div className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
             <MapPin className="h-4 w-4 shrink-0" />
-
             <span>
               {hospital.city || hospital.district || "Location unavailable"}
               {hospital.state ? `, ${hospital.state}` : ""}
@@ -69,9 +78,17 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
         )}
       </div>
 
+      {/* AI Match Reason Banner */}
+      {hospital.ai_match_reason && (
+        <div className="mt-3 rounded-xl bg-muted/60 border border-border/80 px-3 py-2 text-xs font-medium text-foreground/90">
+          <span className="text-primary font-bold mr-1">Why it's best and recommended:</span>
+          {hospital.ai_match_reason}
+        </div>
+      )}
+
       {/* Distance */}
       {hospital.distance_km !== undefined && (
-        <div className="mt-4 text-sm font-medium text-foreground">
+        <div className="mt-3 text-sm font-medium text-foreground">
           {hospital.distance_km.toFixed(2)} km away
         </div>
       )}
@@ -79,13 +96,28 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
       {/* Specialties */}
       {hospital.specialties && (
         <div className="mt-3">
-          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
             Specialties
           </p>
-
-          <p className="line-clamp-2 text-sm text-foreground">
-            {hospital.specialties}
-          </p>
+          <div className="flex flex-wrap gap-1.5 max-h-24 overflow-hidden">
+            {Array.from(
+              new Set<string>(
+                String(hospital.specialties)
+                  .split(/\\n|\n|,|;/)
+                  .map((s) => s.trim())
+                  .filter((s) => s.length > 0)
+              )
+            )
+              .slice(0, 8)
+              .map((spec, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center rounded-lg bg-muted px-2.5 py-1 text-xs font-medium text-foreground"
+                >
+                  {spec}
+                </span>
+              ))}
+          </div>
         </div>
       )}
 
@@ -97,11 +129,10 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
               <BedDouble className="h-4 w-4" />
               <span className="text-xs">Beds</span>
             </div>
-
             <p className="mt-1 text-sm font-semibold text-foreground">
               {hospital.total_beds && hospital.total_beds > 0
-      ? hospital.total_beds
-      : "Not available"}
+                ? hospital.total_beds
+                : "Not available"}
             </p>
           </div>
         )}
@@ -112,7 +143,6 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
               <Phone className="h-4 w-4" />
               <span className="text-xs">Contact</span>
             </div>
-
             <p className="mt-1 truncate text-sm font-semibold text-foreground">
               {hospital.phone}
             </p>

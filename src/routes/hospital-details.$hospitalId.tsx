@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import api from "@/lib/api";
 
 import { DashboardSidebar } from "@/components/dashboard/Sidebar";
+import { HospitalLocationMap } from "@/components/dashboard/HospitalLocationMap";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -132,6 +133,73 @@ const displayNumber = (
 
   return value.toString();
 };
+
+/*
+ * Presence check used to hide fields the hospital
+ * has not provided, instead of printing
+ * "Not available in directory" everywhere.
+ */
+function has<T>(
+  value: T
+): value is Exclude<T, null | undefined | "" | "0" | "0.0"> {
+  if (value === null || value === undefined) return false;
+
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "number") return Number.isFinite(value);
+
+  const trimmed = String(value).trim();
+
+  return (
+    trimmed.length > 0 &&
+    trimmed !== "0" &&
+    trimmed !== "0.0" &&
+    trimmed.toLowerCase() !== "null" &&
+    trimmed.toLowerCase() !== "none" &&
+    trimmed.toLowerCase() !== "n/a" &&
+    trimmed.toLowerCase() !== "na"
+  );
+}
+
+/*
+ * Splits raw directory strings (specialties,
+ * facilities, ...) into a clean de-duplicated list.
+ */
+const splitList = (
+  value: string | null | undefined
+): string[] => {
+  if (!has(value)) return [];
+
+  return Array.from(
+    new Set(
+      String(value)
+        .split(/\\n|\n|,|;|\||\u2022/)
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+    )
+  );
+};
+
+// ---------------------------------------------------------
+// Small label/value row used inside dense panels
+// ---------------------------------------------------------
+
+function Detail({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div>
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="text-xs font-medium">{value}</p>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------
 // Route
@@ -278,7 +346,7 @@ useEffect(() => {
     if (!hospital) return;
 
     window.open(
-      `https://www.google.com/maps/dir/?api=1&destination=${hospital.latitude},${hospital.longitude}`,
+      `https://www.openstreetmap.org/?mlat=${hospital.latitude}&mlon=${hospital.longitude}#map=16/${hospital.latitude}/${hospital.longitude}`,
       "_blank"
     );
   };
@@ -292,35 +360,97 @@ useEffect(() => {
   };
 
   // -------------------------------------------------------
+  // Parallax: map layer sits fixed behind the scroll layer.
+  // As the details sheet scrolls up it covers the map, and
+  // the map drifts upward slightly slower (parallax feel).
+  // -------------------------------------------------------
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const mapLayerRef = useRef<HTMLDivElement>(null);
+
+  const handleSheetScroll = () => {
+    const scroller = scrollRef.current;
+    const mapLayer = mapLayerRef.current;
+
+    if (!scroller || !mapLayer) return;
+
+    const y = scroller.scrollTop;
+
+    // Map drifts upward at ~30% of the sheet's speed (pure
+    // translate — never scale, so the map always covers the
+    // viewport and the exposed bottom gap stays under the sheet).
+    mapLayer.style.transform = `translate3d(0, ${-y * 0.3}px, 0)`;
+  };
+
+  // -------------------------------------------------------
   // Loading state
   // -------------------------------------------------------
 
   return (
-    <div className="flex min-h-screen bg-muted/30">
-      <DashboardSidebar />
+    <div className="flex h-[100dvh] w-full overflow-hidden bg-background">
+      {/* Desktop Sidebar (hidden on small screens) */}
+      <DashboardSidebar className="hidden md:block" />
 
-      <main className="flex-1 p-4 sm:p-6">
-        <div className="mx-auto max-w-5xl space-y-6">
+      <main className="relative flex-1 overflow-hidden">
+        {/* ============================================ */}
+        {/* MAP LAYER — fixed behind, fills the screen  */}
+        {/* ============================================ */}
+        <div
+          ref={mapLayerRef}
+          className="absolute inset-0 z-0 will-change-transform"
+        >
+          {loading && (
+            <div className="h-full w-full animate-pulse bg-muted/60" />
+          )}
 
-          {/* Back Button */}
-          <Button
-            variant="ghost"
-            onClick={handleBack}
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
-          </Button>
+          {!loading && !error && hospital && (
+            <HospitalLocationMap
+              latitude={hospital.latitude}
+              longitude={hospital.longitude}
+              hospitalName={hospital.name}
+              city={hospital.city}
+              state={hospital.state}
+            />
+          )}
+        </div>
 
-          {/* ------------------------------------------------ */}
-          {/* Loading */}
-          {/* ------------------------------------------------ */}
+        {/* Floating back button over the map */}
+        <button
+          type="button"
+          onClick={handleBack}
+          aria-label="Go back"
+          className="absolute left-3 top-3 z-30 flex h-10 w-10 items-center justify-center rounded-full bg-background/85 text-foreground shadow-md backdrop-blur transition hover:bg-background sm:left-4 sm:top-4"
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+
+        {/* ============================================ */}
+        {/* SCROLL LAYER — spacer reveals the map, then  */}
+        {/* the details sheet slides up and covers it     */}
+        {/* ============================================ */}
+        <div
+          ref={scrollRef}
+          onScroll={handleSheetScroll}
+          className="absolute inset-0 z-10 overflow-y-auto overscroll-contain"
+        >
+          {/* Transparent spacer — map shows through here */}
+          <div className="h-[74%]" />
+
+          {/* Details sheet — rounded top, slides over map */}
+          <section className="relative rounded-t-3xl border-t border-border/60 bg-background shadow-[0_-10px_40px_rgba(0,0,0,0.18)]">
+            {/* Drag grabber */}
+            <div className="sticky top-0 z-20 flex justify-center rounded-t-3xl bg-background pb-1 pt-2.5">
+              <span className="h-1 w-10 rounded-full bg-muted-foreground/30" />
+            </div>
+
+            <div className="mx-auto max-w-5xl px-3 pb-8 sm:px-4">
 
           {loading && (
             <Card className="rounded-2xl">
-              <CardContent className="p-8">
+              <CardContent className="p-4 sm:p-6">
                 <div className="animate-pulse space-y-4">
 
-                  <div className="h-8 w-2/3 rounded bg-muted" />
+                  <div className="h-6 w-2/3 rounded bg-muted sm:h-8" />
 
                   <div className="h-4 w-1/3 rounded bg-muted" />
 
@@ -342,7 +472,7 @@ useEffect(() => {
 
           {!loading && error && (
             <Card className="rounded-2xl">
-              <CardContent className="p-8 text-center">
+              <CardContent className="p-4 sm:p-6 text-center">
                 <p className="text-sm text-destructive">
                   {error}
                 </p>
@@ -356,900 +486,566 @@ useEffect(() => {
 
           {!loading && hospital && (
             <>
-              {/* ============================================ */}
-              {/* Hospital Header */}
-              {/* ============================================ */}
+{/* Compact header strip */}
+              <div className="-mx-3 -mt-1 bg-primary px-3 py-3 text-white sm:-mx-4 sm:px-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h1 className="text-base font-bold leading-tight sm:text-lg">
+                      {hospital.name}
+                    </h1>
 
-              <Card className="overflow-hidden rounded-2xl">
-
-                <div className="bg-gradient-hero p-6 text-white sm:p-8">
-
-                  <div className="flex items-start justify-between gap-4">
-
-                    <div className="min-w-0">
-
-                      <p className="text-sm text-white/75">
-                        Hospital
-                      </p>
-
-                      <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
-                        {hospital.name}
-                      </h1>
-
-                      {/* Location */}
-                      <div className="mt-3 flex items-start gap-2 text-sm">
-
-                        <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
-
+                    {(has(hospital.city) || has(hospital.district)) && (
+                      <p className="mt-1 flex items-start gap-1 text-[11px] text-white/80 sm:text-xs">
+                        <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
                         <span>
-                          {hospital.city
-                            ? `${hospital.city}, `
-                            : ""}
-                          {hospital.state}
+                          {Array.from(
+                            new Set(
+                              [hospital.city, hospital.district, hospital.state].filter(
+                                (part): part is string => has(part)
+                              )
+                            )
+                          ).join(", ")}
                         </span>
-
-                      </div>
-
-                      {/* District */}
-                      {hospital.district && (
-                        <p className="mt-1 pl-6 text-sm text-white/75">
-                          {hospital.district}
-                        </p>
-                      )}
-
-                    </div>
-
-                    {/* Emergency Badge */}
-                    {hospital.emergency_available && (
-                      <Badge className="shrink-0 bg-emergency text-emergency-foreground">
-                        24/7 Emergency
-                      </Badge>
+                      </p>
                     )}
-
                   </div>
 
+                  {hospital.emergency_available && (
+                    <Badge className="shrink-0 bg-emergency text-[10px] text-emergency-foreground">
+                      24/7 Emergency
+                    </Badge>
+                  )}
                 </div>
-
-              </Card>
-
-              {/* ============================================ */}
-              {/* Hospital Summary Cards */}
-              {/* ============================================ */}
-
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-
-                {/* Total Beds */}
-                <Card className="rounded-2xl">
-
-                  <CardContent className="p-5">
-
-                    <Bed className="h-5 w-5 text-primary" />
-
-                    <p className="mt-3 text-xl font-bold">
-                      {displayNumber(hospital.total_beds)}
-                    </p>
-
-                    <p className="text-xs text-muted-foreground">
-                      Total Beds
-                    </p>
-
-                  </CardContent>
-
-                </Card>
-
-                {/* Emergency */}
-                <Card className="rounded-2xl">
-
-                  <CardContent className="p-5">
-
-                    <Ambulance className="h-5 w-5 text-primary" />
-
-                    <p className="mt-3 text-xl font-bold">
-                      {hospital.emergency_available
-                        ? "Available"
-                        : "Not Listed"}
-                    </p>
-
-                    <p className="text-xs text-muted-foreground">
-                      Emergency Services
-                    </p>
-
-                  </CardContent>
-
-                </Card>
-
-                {/* Specialties */}
-                <Card className="rounded-2xl">
-
-                  <CardContent className="p-5">
-
-                    <Stethoscope className="h-5 w-5 text-primary" />
-
-                    <p className="mt-3 text-xl font-bold">
-                      {hospital.specialties
-                        ? "Available"
-                        : "Not Listed"}
-                    </p>
-
-                    <p className="text-xs text-muted-foreground">
-                      Specialties
-                    </p>
-
-                  </CardContent>
-
-                </Card>
-
-                {/* PIN Code */}
-                <Card className="rounded-2xl">
-
-                  <CardContent className="p-5">
-
-                    <MapPin className="h-5 w-5 text-primary" />
-
-                    <p className="mt-3 text-xl font-bold">
-                      {displayValue(hospital.pincode)}
-                    </p>
-
-                    <p className="text-xs text-muted-foreground">
-                      PIN Code
-                    </p>
-
-                  </CardContent>
-
-                </Card>
-
               </div>
 
-              {/* ============================================ */}
-              {/* Basic Hospital Information */}
-              {/* ============================================ */}
-
-              <Card className="rounded-2xl">
-
-                <CardContent className="p-6">
-
-                  <div className="mb-5 flex items-center gap-2">
-                    <Building2 className="h-5 w-5 text-primary" />
-
-                    <h2 className="text-lg font-semibold">
-                      Hospital Information
-                    </h2>
-                  </div>
-
-                  <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Hospital Category
-                      </p>
-
-                      <p className="mt-1 font-medium">
-                        {displayValue(hospital.category)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Care Type
-                      </p>
-
-                      <p className="mt-1 font-medium">
-                        {displayValue(hospital.care_type)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Medical Discipline
-                      </p>
-
-                      <p className="mt-1 font-medium">
-                        {displayValue(hospital.discipline)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        City
-                      </p>
-
-                      <p className="mt-1 font-medium">
-                        {displayValue(hospital.city)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        District
-                      </p>
-
-                      <p className="mt-1 font-medium">
-                        {displayValue(hospital.district)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        PIN Code
-                      </p>
-
-                      <p className="mt-1 font-medium">
-                        {displayValue(hospital.pincode)}
-                      </p>
-                    </div>
-
-                  </div>
-
-                </CardContent>
-
-              </Card>
-
-              {/* ============================================ */}
-              {/* Address */}
-              {/* ============================================ */}
-
-              <Card className="rounded-2xl">
-
-                <CardContent className="p-6">
-
-                  <h2 className="font-semibold">
-                    Address
-                  </h2>
-
-                  <p className="mt-2 flex gap-2 text-sm text-muted-foreground">
-
-                    <MapPin className="h-4 w-4 shrink-0" />
-
-                    <span>
-                      {displayValue(hospital.address)}
-                    </span>
-
-                  </p>
-
-                  {hospital.subdistrict && (
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Subdistrict: {hospital.subdistrict}
-                    </p>
+              {/* Quick actions — only what the hospital provides */}
+              {(has(hospital.emergency_phone) ||
+                has(hospital.ambulance_phone) ||
+                has(hospital.bloodbank_phone) ||
+                has(hospital.phone) ||
+                has(hospital.mobile)) && (
+                <div className="-mx-3 mt-3 flex gap-2 overflow-x-auto px-3 pb-1 sm:-mx-4 sm:px-4">
+                  {has(hospital.emergency_phone) && (
+                    <a
+                      href={`tel:${hospital.emergency_phone}`}
+                      className="flex shrink-0 items-center gap-1.5 rounded-xl bg-destructive px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      <Ambulance className="h-4 w-4" />
+                      Emergency
+                    </a>
                   )}
 
-                  {hospital.district && (
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {hospital.district}, {hospital.state}
-                    </p>
+                  {has(hospital.ambulance_phone) && (
+                    <a
+                      href={`tel:${hospital.ambulance_phone}`}
+                      className="flex shrink-0 items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-semibold"
+                    >
+                      <Ambulance className="h-4 w-4" />
+                      Ambulance
+                    </a>
                   )}
 
-                </CardContent>
+                  {has(hospital.bloodbank_phone) && (
+                    <a
+                      href={`tel:${hospital.bloodbank_phone}`}
+                      className="flex shrink-0 items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-semibold"
+                    >
+                      <Phone className="h-4 w-4" />
+                      Blood Bank
+                    </a>
+                  )}
 
-              </Card>
+                  {has(hospital.phone) && (
+                    <a
+                      href={`tel:${hospital.phone}`}
+                      className="flex shrink-0 items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-semibold"
+                    >
+                      <Phone className="h-4 w-4" />
+                      {hospital.phone}
+                    </a>
+                  )}
 
-              {/* ============================================ */}
-              {/* Medical Information */}
-              {/* ============================================ */}
+                  {has(hospital.mobile) && (
+                    <a
+                      href={`tel:${hospital.mobile}`}
+                      className="flex shrink-0 items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-semibold"
+                    >
+                      <Phone className="h-4 w-4" />
+                      {hospital.mobile}
+                    </a>
+                  )}
+                </div>
+              )}
 
-              <Card className="rounded-2xl">
-
-                <CardContent className="p-6">
-
-                  <div className="flex items-center gap-2">
-                    <Stethoscope className="h-5 w-5 text-primary" />
-
-                    <h2 className="text-lg font-semibold">
-                      Medical Information
-                    </h2>
-                  </div>
-
-                  <div className="mt-6 space-y-6">
-
-                    {/* Specialties */}
-                    <div>
-                      <p className="text-sm font-medium">
-                        Specialties
+              {/* Key numbers — only available ones */}
+              {(has(hospital.total_beds) ||
+                hospital.emergency_available ||
+                has(hospital.specialties) ||
+                (waitingPrediction?.prediction_available &&
+                  has(waitingPrediction.predicted_waiting_minutes))) && (
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {has(hospital.total_beds) && (
+                    <div className="rounded-xl bg-card p-2.5 ring-1 ring-border">
+                      <Bed className="h-4 w-4 text-primary" />
+                      <p className="mt-1 text-base font-bold">
+                        {hospital.total_beds}
                       </p>
-
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {displayValue(hospital.specialties)}
-                      </p>
-                    </div>
-
-                    {/* Facilities */}
-                    <div>
-                      <p className="text-sm font-medium">
-                        Facilities
-                      </p>
-
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {displayValue(hospital.facilities)}
-                      </p>
-                    </div>
-
-                    {/* Miscellaneous Facilities */}
-                    <div>
-                      <p className="text-sm font-medium">
-                        Additional Facilities
-                      </p>
-
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {displayValue(
-                          hospital.miscellaneous_facilities
-                        )}
-                      </p>
-                    </div>
-
-                  </div>
-
-                </CardContent>
-
-              </Card>
-                <Card>
-  <CardContent className="p-6">
-    <div className="flex items-center gap-3 mb-5">
-      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-        <Bed className="h-5 w-5 text-primary" />
-      </div>
-
-      <div>
-        <h2 className="text-lg font-semibold">
-          Current Availability
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Hospital availability information
-        </p>
-      </div>
-    </div>
-
-    {!availability?.availability_available ? (
-      <div className="rounded-lg border border-dashed p-5">
-        <p className="font-medium">
-          Availability data not available
-        </p>
-
-        <p className="mt-1 text-sm text-muted-foreground">
-          Current bed availability has not been provided by a
-          verified source.
-        </p>
-      </div>
-    ) : (
-      <>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="rounded-lg border p-4">
-            <p className="text-sm text-muted-foreground">
-              General Beds
-            </p>
-            <p className="mt-1 text-2xl font-bold">
-              {availability.available_general_beds ?? "—"}
-            </p>
-          </div>
-
-          <div className="rounded-lg border p-4">
-            <p className="text-sm text-muted-foreground">
-              ICU Beds
-            </p>
-            <p className="mt-1 text-2xl font-bold">
-              {availability.available_icu_beds ?? "—"}
-            </p>
-          </div>
-
-          <div className="rounded-lg border p-4">
-            <p className="text-sm text-muted-foreground">
-              Emergency Beds
-            </p>
-            <p className="mt-1 text-2xl font-bold">
-              {availability.available_emergency_beds ?? "—"}
-            </p>
-          </div>
-        </div>
-
-        {availability.emergency_status && (
-          <div className="mt-4">
-            <p className="text-sm text-muted-foreground">
-              Emergency Status
-            </p>
-
-            <Badge className="mt-1">
-              {availability.emergency_status}
-            </Badge>
-          </div>
-        )}
-
-        <div className="mt-5 rounded-lg bg-muted/50 p-4">
-          <p className="text-sm">
-            <span className="font-medium">Source:</span>{" "}
-            {availability.source_type || "Not specified"}
-          </p>
-
-          {availability.observed_at && (
-            <p className="mt-1 text-sm text-muted-foreground">
-              Last updated:{" "}
-              {new Date(
-                availability.observed_at
-              ).toLocaleString()}
-            </p>
-          )}
-        </div>
-      </>
-    )}
-  </CardContent>
-</Card>
-              {/* ============================================ */}
-              {/* Hospital Capacity */}
-              {/* ============================================ */}
-
-              <Card className="rounded-2xl">
-
-                <CardContent className="p-6">
-
-                  <div className="flex items-center gap-2">
-                    <Bed className="h-5 w-5 text-primary" />
-
-                    <h2 className="text-lg font-semibold">
-                      Hospital Capacity
-                    </h2>
-                  </div>
-
-                  <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-[10px] text-muted-foreground">
                         Total Beds
                       </p>
-
-                      <p className="mt-1 font-medium">
-                        {displayNumber(hospital.total_beds)}
-                      </p>
                     </div>
+                  )}
 
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Private Wards
+                  {has(hospital.doctors) && (
+                    <div className="rounded-xl bg-card p-2.5 ring-1 ring-border">
+                      <Stethoscope className="h-4 w-4 text-primary" />
+                      <p className="mt-1 text-base font-bold">
+                        {hospital.doctors}
                       </p>
-
-                      <p className="mt-1 font-medium">
-                        {displayNumber(hospital.private_wards)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        EWS Beds
-                      </p>
-
-                      <p className="mt-1 font-medium">
-                        {displayNumber(
-                          hospital.economically_weaker_beds
-                        )}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-[10px] text-muted-foreground">
                         Doctors
                       </p>
+                    </div>
+                  )}
 
-                      <p className="mt-1 font-medium">
-                        {displayNumber(hospital.doctors)}
+                  {hospital.emergency_available && (
+                    <div className="rounded-xl bg-card p-2.5 ring-1 ring-border">
+                      <Ambulance className="h-4 w-4 text-destructive" />
+                      <p className="mt-1 text-sm font-bold text-destructive">
+                        24/7
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Emergency
                       </p>
                     </div>
+                  )}
 
+                  {waitingPrediction?.prediction_available &&
+                    has(waitingPrediction.predicted_waiting_minutes) && (
+                      <div className="rounded-xl bg-card p-2.5 ring-1 ring-border">
+                        <Clock className="h-4 w-4 text-primary" />
+                        <p className="mt-1 text-base font-bold">
+                          ~{waitingPrediction.predicted_waiting_minutes}m
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Est. Wait
+                        </p>
+                      </div>
+                    )}
+                </div>
+              )}
+
+              {/* Specialties — chips, only when present */}
+              {splitList(hospital.specialties).length > 0 && (
+                <section className="mt-3 rounded-xl bg-card p-3 ring-1 ring-border">
+                  <h2 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    <Stethoscope className="h-3.5 w-3.5 text-primary" />
+                    Specialties
+                  </h2>
+
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {splitList(hospital.specialties).map((spec) => (
+                      <span
+                        key={spec}
+                        className="rounded-lg bg-muted px-2 py-1 text-[11px] font-medium"
+                      >
+                        {spec}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Live bed availability — only when backend provides it */}
+              {availability?.availability_available && (
+                <section className="mt-3 rounded-xl bg-card p-3 ring-1 ring-border">
+                  <h2 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    <Bed className="h-3.5 w-3.5 text-primary" />
+                    Beds Available Now
+                  </h2>
+
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {has(availability.available_general_beds) && (
+                      <div className="rounded-lg bg-muted/60 p-2 text-center">
+                        <p className="text-lg font-bold">
+                          {availability.available_general_beds}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          General
+                        </p>
+                      </div>
+                    )}
+
+                    {has(availability.available_icu_beds) && (
+                      <div className="rounded-lg bg-muted/60 p-2 text-center">
+                        <p className="text-lg font-bold">
+                          {availability.available_icu_beds}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          ICU
+                        </p>
+                      </div>
+                    )}
+
+                    {has(availability.available_emergency_beds) && (
+                      <div className="rounded-lg bg-muted/60 p-2 text-center">
+                        <p className="text-lg font-bold text-destructive">
+                          {availability.available_emergency_beds}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Emergency
+                        </p>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="mt-6 grid gap-6 sm:grid-cols-2">
+                  {(has(availability.emergency_status) ||
+                    has(availability.source_type) ||
+                    has(availability.observed_at)) && (
+                    <div className="mt-2 space-y-0.5 text-[11px] text-muted-foreground">
+                      {has(availability.emergency_status) && (
+                        <p>
+                          Status:{" "}
+                          <span className="font-medium text-foreground">
+                            {availability.emergency_status}
+                          </span>
+                        </p>
+                      )}
 
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Medical Consultants / Experts
-                      </p>
+                      {has(availability.observed_at) && (
+                        <p>
+                          Updated{" "}
+                          {new Date(
+                            availability.observed_at
+                          ).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
 
-                      <p className="mt-1 font-medium">
-                        {displayNumber(
-                          hospital.medical_consultants
+              {/* Everything else that the hospital actually has */}
+              {(has(hospital.category) ||
+                has(hospital.care_type) ||
+                has(hospital.discipline) ||
+                has(hospital.established_year) ||
+                has(hospital.accreditation) ||
+                has(hospital.registration_number) ||
+                has(hospital.empanelment) ||
+                has(hospital.tariff_range) ||
+                has(hospital.subdistrict) ||
+                has(hospital.pincode) ||
+                has(hospital.facilities) ||
+                has(hospital.miscellaneous_facilities) ||
+                has(hospital.emergency_services) ||
+                has(hospital.tollfree) ||
+                has(hospital.helpline) ||
+                has(hospital.email) ||
+                has(hospital.website)) && (
+                <section className="mt-3 overflow-hidden rounded-xl bg-card ring-1 ring-border">
+                  {/* Address */}
+                  {(has(hospital.address) ||
+                    has(hospital.subdistrict) ||
+                    has(hospital.pincode)) && (
+                    <div className="flex gap-2 border-b border-border/60 p-3">
+                      <MapPin className="h-4 w-4 shrink-0 text-primary" />
+                      <p className="text-xs leading-relaxed">
+                        {has(hospital.address) && (
+                          <span className="block">
+                            {hospital.address}
+                          </span>
+                        )}
+
+                        {has(hospital.subdistrict) && (
+                          <span className="block text-muted-foreground">
+                            {hospital.subdistrict}
+                          </span>
+                        )}
+
+                        {has(hospital.pincode) && (
+                          <span className="block text-muted-foreground">
+                            PIN {hospital.pincode}
+                          </span>
                         )}
                       </p>
                     </div>
+                  )}
 
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Established Year
-                      </p>
+                  {/* Facilities */}
+                  {splitList(hospital.facilities).length > 0 && (
+                    <div className="border-b border-border/60 p-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Facilities
+                      </h3>
 
-                      <p className="mt-1 font-medium">
-                        {displayNumber(
-                          hospital.established_year
-                        )}
-                      </p>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {splitList(hospital.facilities).map((item) => (
+                          <span
+                            key={item}
+                            className="rounded-lg bg-muted px-2 py-0.5 text-[11px]"
+                          >
+                            {item}
+                          </span>
+                        ))}
+                      </div>
                     </div>
+                  )}
 
-                  </div>
+                  {splitList(hospital.miscellaneous_facilities).length > 0 && (
+                    <div className="border-b border-border/60 p-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Additional Facilities
+                      </h3>
 
-                </CardContent>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {splitList(
+                          hospital.miscellaneous_facilities
+                        ).map((item) => (
+                          <span
+                            key={item}
+                            className="rounded-lg bg-muted px-2 py-0.5 text-[11px]"
+                          >
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-              </Card>
-              
-              <Card>
-  <CardContent className="p-6">
-    <div className="flex items-start gap-4">
-      <div className="rounded-lg bg-primary/10 p-3">
-        <Clock className="h-6 w-6 text-primary" />
-      </div>
+                  {/* Classification */}
+                  {(has(hospital.category) ||
+                    has(hospital.care_type) ||
+                    has(hospital.discipline) ||
+                    has(hospital.established_year)) && (
+                    <div className="border-b border-border/60 p-3">
+                      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        <Building2 className="h-3.5 w-3.5 text-primary" />
+                        Classification
+                      </h3>
 
-      <div className="flex-1">
-        <h3 className="font-semibold">
-          AI Estimated Waiting Time
-        </h3>
+                      <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1.5">
+                        {has(hospital.category) && (
+                          <Detail label="Category" value={hospital.category} />
+                        )}
 
-        {waitingLoading ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            Calculating estimate...
-          </p>
-        ) : waitingPrediction?.prediction_available ? (
-          <>
-            <p className="mt-2 text-2xl font-bold">
-              ~{waitingPrediction.predicted_waiting_minutes} minutes
-            </p>
+                        {has(hospital.care_type) && (
+                          <Detail label="Care Type" value={hospital.care_type} />
+                        )}
 
-            <p className="mt-1 text-xs text-muted-foreground">
-              AI-generated estimate
-            </p>
+                        {has(hospital.discipline) && (
+                          <Detail
+                            label="Discipline"
+                            value={hospital.discipline}
+                          />
+                        )}
 
-            <p className="mt-2 text-xs text-muted-foreground">
-              Model: Random Forest
-            </p>
-          </>
-        ) : (
-          <p className="mt-2 text-sm text-muted-foreground">
-            Waiting-time prediction is currently unavailable.
-          </p>
-        )}
-      </div>
-    </div>
-  </CardContent>
-</Card>
-
-              {/* ============================================ */}
-              {/* Emergency Services */}
-              {/* ============================================ */}
-
-              <Card className="rounded-2xl">
-
-                <CardContent className="p-6">
-
-                  <div className="flex items-center gap-2">
-                    <Ambulance className="h-5 w-5 text-primary" />
-
-                    <h2 className="text-lg font-semibold">
-                      Emergency Services
-                    </h2>
-                  </div>
-
-                  <div className="mt-6 grid gap-6 sm:grid-cols-2">
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Emergency Availability
-                      </p>
-
-                      <div className="mt-2">
-                        {hospital.emergency_available ? (
-                          <Badge>
-                            Emergency Available
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">
-                            Emergency Not Listed
-                          </Badge>
+                        {has(hospital.established_year) && (
+                          <Detail
+                            label="Established"
+                            value={hospital.established_year}
+                          />
                         )}
                       </div>
                     </div>
+                  )}
 
-                    <div>
-                      <p className="text-sm text-muted-foreground">
+                  {/* Emergency services detail */}
+                  {has(hospital.emergency_services) && (
+                    <div className="border-b border-border/60 p-3">
+                      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        <Ambulance className="h-3.5 w-3.5 text-destructive" />
                         Emergency Services
-                      </p>
+                      </h3>
 
-                      <p className="mt-1">
-                        {displayValue(
-                          hospital.emergency_services
-                        )}
+                      <p className="mt-1.5 text-xs">
+                        {hospital.emergency_services}
                       </p>
                     </div>
+                  )}
 
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Emergency Phone
-                      </p>
-
-                      {hospital.emergency_phone ? (
-                        <a
-                          href={`tel:${hospital.emergency_phone}`}
-                          className="mt-1 flex items-center gap-2 text-primary hover:underline"
-                        >
-                          <Phone className="h-4 w-4" />
-                          {hospital.emergency_phone}
-                        </a>
-                      ) : (
-                        <p className="mt-1">
-                          Not available in directory
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Ambulance
-                      </p>
-
-                      {hospital.ambulance_phone ? (
-                        <a
-                          href={`tel:${hospital.ambulance_phone}`}
-                          className="mt-1 flex items-center gap-2 text-primary hover:underline"
-                        >
-                          <Ambulance className="h-4 w-4" />
-                          {hospital.ambulance_phone}
-                        </a>
-                      ) : (
-                        <p className="mt-1">
-                          Not available in directory
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Blood Bank
-                      </p>
-
-                      {hospital.bloodbank_phone ? (
-                        <a
-                          href={`tel:${hospital.bloodbank_phone}`}
-                          className="mt-1 flex items-center gap-2 text-primary hover:underline"
-                        >
-                          <Phone className="h-4 w-4" />
-                          {hospital.bloodbank_phone}
-                        </a>
-                      ) : (
-                        <p className="mt-1">
-                          Not available in directory
-                        </p>
-                      )}
-                    </div>
-
-                  </div>
-
-                </CardContent>
-
-              </Card>
-
-              {/* ============================================ */}
-              {/* Contact Information */}
-              {/* ============================================ */}
-
-              <Card className="rounded-2xl">
-
-                <CardContent className="p-6">
-
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-5 w-5 text-primary" />
-
-                    <h2 className="text-lg font-semibold">
-                      Contact Information
-                    </h2>
-                  </div>
-
-                  <div className="mt-6 grid gap-6 sm:grid-cols-2">
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Telephone
-                      </p>
-
-                      {hospital.phone ? (
-                        <a
-                          href={`tel:${hospital.phone}`}
-                          className="mt-1 flex items-center gap-2 text-primary hover:underline"
-                        >
-                          <Phone className="h-4 w-4" />
-                          {hospital.phone}
-                        </a>
-                      ) : (
-                        <p className="mt-1">
-                          Not available in directory
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Mobile
-                      </p>
-
-                      {hospital.mobile ? (
-                        <a
-                          href={`tel:${hospital.mobile}`}
-                          className="mt-1 flex items-center gap-2 text-primary hover:underline"
-                        >
-                          <Phone className="h-4 w-4" />
-                          {hospital.mobile}
-                        </a>
-                      ) : (
-                        <p className="mt-1">
-                          Not available in directory
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Toll-Free
-                      </p>
-
-                      <p className="mt-1">
-                        {displayValue(hospital.tollfree)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Helpline
-                      </p>
-
-                      <p className="mt-1">
-                        {displayValue(hospital.helpline)}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Email
-                      </p>
-
-                      {hospital.email ? (
-                        <a
-                          href={`mailto:${hospital.email}`}
-                          className="mt-1 flex items-center gap-2 text-primary hover:underline break-all"
-                        >
-                          <Mail className="h-4 w-4 shrink-0" />
-                          {hospital.email}
-                        </a>
-                      ) : (
-                        <p className="mt-1">
-                          Not available in directory
-                        </p>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Website
-                      </p>
-
-                      {hospital.website ? (
-                        <a
-                          href={
-                            hospital.website.startsWith("http")
-                              ? hospital.website
-                              : `https://${hospital.website}`
-                          }
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-1 flex items-center gap-2 text-primary hover:underline"
-                        >
-                          <Globe className="h-4 w-4" />
-                          Visit hospital website
-                        </a>
-                      ) : (
-                        <p className="mt-1">
-                          Not available in directory
-                        </p>
-                      )}
-                    </div>
-
-                  </div>
-
-                </CardContent>
-
-              </Card>
-
-              {/* ============================================ */}
-              {/* Accreditation & Registration */}
-              {/* ============================================ */}
-
-              <Card className="rounded-2xl">
-
-                <CardContent className="p-6">
-
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="h-5 w-5 text-primary" />
-
-                    <h2 className="text-lg font-semibold">
-                      Registration & Accreditation
-                    </h2>
-                  </div>
-
-                  <div className="mt-6 grid gap-6 sm:grid-cols-2">
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
+                  {/* Accreditation */}
+                  {(has(hospital.accreditation) ||
+                    has(hospital.registration_number) ||
+                    has(hospital.empanelment)) && (
+                    <div className="border-b border-border/60 p-3">
+                      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        <ShieldCheck className="h-3.5 w-3.5 text-primary" />
                         Accreditation
-                      </p>
+                      </h3>
 
-                      <p className="mt-1">
-                        {displayValue(
-                          hospital.accreditation
+                      <div className="mt-1.5 space-y-1">
+                        {has(hospital.accreditation) && (
+                          <p className="text-xs">
+                            <span className="text-muted-foreground">
+                              Accreditation:{" "}
+                            </span>
+                            {hospital.accreditation}
+                          </p>
                         )}
+
+                        {has(hospital.registration_number) && (
+                          <p className="text-xs">
+                            <span className="text-muted-foreground">
+                              Registration:{" "}
+                            </span>
+                            {hospital.registration_number}
+                          </p>
+                        )}
+
+                        {has(hospital.empanelment) && (
+                          <p className="text-xs">
+                            <span className="text-muted-foreground">
+                              Empanelment:{" "}
+                            </span>
+                            {hospital.empanelment}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Remaining contact channels */}
+                  {(has(hospital.tollfree) ||
+                    has(hospital.helpline) ||
+                    has(hospital.email) ||
+                    has(hospital.website)) && (
+                    <div className="border-b border-border/60 p-3">
+                      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        <Phone className="h-3.5 w-3.5 text-primary" />
+                        Other Channels
+                      </h3>
+
+                      <div className="mt-1.5 space-y-1">
+                        {has(hospital.tollfree) && (
+                          <a
+                            href={`tel:${hospital.tollfree}`}
+                            className="block text-xs font-medium text-primary"
+                          >
+                            Toll-free: {hospital.tollfree}
+                          </a>
+                        )}
+
+                        {has(hospital.helpline) && (
+                          <a
+                            href={`tel:${hospital.helpline}`}
+                            className="block text-xs font-medium text-primary"
+                          >
+                            Helpline: {hospital.helpline}
+                          </a>
+                        )}
+
+                        {has(hospital.email) && (
+                          <a
+                            href={`mailto:${hospital.email}`}
+                            className="flex items-center gap-1.5 text-xs font-medium text-primary"
+                          >
+                            <Mail className="h-3.5 w-3.5 shrink-0" />
+                            <span className="break-all">
+                              {hospital.email}
+                            </span>
+                          </a>
+                        )}
+
+                        {has(hospital.website) && (
+                          <a
+                            href={
+                              hospital.website.startsWith("http")
+                                ? hospital.website
+                                : `https://${hospital.website}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 text-xs font-medium text-primary"
+                          >
+                            <Globe className="h-3.5 w-3.5 shrink-0" />
+                            Website
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tariff */}
+                  {has(hospital.tariff_range) && (
+                    <div className="p-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                        Tariff Range
+                      </h3>
+
+                      <p className="mt-1 text-xs">
+                        {hospital.tariff_range}
                       </p>
                     </div>
+                  )}
+                </section>
+              )}
 
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Registration Number
-                      </p>
-
-                      <p className="mt-1">
-                        {displayValue(
-                          hospital.registration_number
-                        )}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">
-                        Empanelment / Collaboration
-                      </p>
-
-                      <p className="mt-1">
-                        {displayValue(
-                          hospital.empanelment
-                        )}
-                      </p>
-                    </div>
-
-                  </div>
-
-                </CardContent>
-
-              </Card>
-
-              {/* ============================================ */}
-              {/* Tariff Information */}
-              {/* ============================================ */}
-
-              <Card className="rounded-2xl">
-
-                <CardContent className="p-6">
-
-                  <h2 className="font-semibold">
-                    Tariff Information
+              {/* Capacity breakdown — only populated fields */}
+              {(has(hospital.private_wards) ||
+                has(hospital.economically_weaker_beds) ||
+                has(hospital.medical_consultants)) && (
+                <section className="mt-3 rounded-xl bg-card p-3 ring-1 ring-border">
+                  <h2 className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Capacity Breakdown
                   </h2>
 
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {displayValue(hospital.tariff_range)}
-                  </p>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {has(hospital.private_wards) && (
+                      <div className="rounded-lg bg-muted/60 p-2 text-center">
+                        <p className="text-base font-bold">
+                          {hospital.private_wards}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Private
+                        </p>
+                      </div>
+                    )}
 
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Tariff information is based on the available
-                    hospital directory data and may not represent
-                    the current consultation or treatment cost.
-                  </p>
+                    {has(hospital.economically_weaker_beds) && (
+                      <div className="rounded-lg bg-muted/60 p-2 text-center">
+                        <p className="text-base font-bold">
+                          {hospital.economically_weaker_beds}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          EWS
+                        </p>
+                      </div>
+                    )}
 
-                </CardContent>
-
-              </Card>
-
+                    {has(hospital.medical_consultants) && (
+                      <div className="rounded-lg bg-muted/60 p-2 text-center">
+                        <p className="text-base font-bold">
+                          {hospital.medical_consultants}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Consultants
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
               {/* ============================================ */}
               {/* Navigation */}
               {/* ============================================ */}
 
-              <Button
-                size="lg"
-                className="w-full"
-                onClick={handleNavigate}
-              >
-                <Navigation className="mr-2 h-4 w-4" />
-                Navigate to Hospital
-              </Button>
+              <div className="sticky bottom-0 -mx-3 mt-4 border-t border-border/60 bg-background/95 px-3 py-3 backdrop-blur-sm sm:-mx-4 sm:px-4">
+                <Button
+                  size="lg"
+                  className="w-full"
+                  onClick={handleNavigate}
+                >
+                  <Navigation className="mr-2 h-4 w-4" />
+                  Navigate via OpenStreetMap
+                </Button>
+              </div>
 
             </>
           )}
 
+            </div>
+          </section>
         </div>
       </main>
     </div>

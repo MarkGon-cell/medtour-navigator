@@ -1,0 +1,488 @@
+[
+  {
+    "model": "01-ai/yi-large",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "adept/fuyu-8b",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "ai21labs/jamba-1.5-large-instruct",
+    "status": "HTTP 404",
+    "latency": 0.14,
+    "output": "Not Found"
+  },
+  {
+    "model": "aisingapore/sea-lion-7b-instruct",
+    "status": "HTTP 404",
+    "latency": 0.07,
+    "output": "Not Found"
+  },
+  {
+    "model": "bigcode/starcoder2-15b",
+    "status": "HTTP 404",
+    "latency": 0.07,
+    "output": "404 page not found\n"
+  },
+  {
+    "model": "databricks/dbrx-instruct",
+    "status": "HTTP 404",
+    "latency": 0.1,
+    "output": "Not Found"
+  },
+  {
+    "model": "deepseek-ai/deepseek-coder-6.7b-instruct",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "deepseek-ai/deepseek-v4.1-flash",
+    "status": "TIMEOUT/ERROR",
+    "latency": 12.06,
+    "output": "Timeout (>8s)"
+  },
+  {
+    "model": "google/codegemma-1.1-7b",
+    "status": "HTTP 404",
+    "latency": 0.12,
+    "output": "Not Found"
+  },
+  {
+    "model": "google/codegemma-7b",
+    "status": "HTTP 404",
+    "latency": 0.14,
+    "output": "Not Found"
+  },
+  {
+    "model": "google/deplot",
+    "status": "HTTP 404",
+    "latency": 0.11,
+    "output": "Not Found"
+  },
+  {
+    "model": "google/diffusiongemma-26b-a4b-it",
+    "status": "WORKING (200 OK)",
+    "latency": 0.35,
+    "output": ""
+  },
+  {
+    "model": "google/gemma-2b",
+    "status": "HTTP 404",
+    "latency": 0.1,
+    "output": "Not Found"
+  },
+  {
+    "model": "google/gemma-3-12b-it",
+    "status": "HTTP 404",
+    "latency": 0.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "google/gemma-3-4b-it",
+    "status": "HTTP 404",
+    "latency": 0.1,
+    "output": "Not Found"
+  },
+  {
+    "model": "google/gemma-4-31b-it",
+    "status": "TIMEOUT/ERROR",
+    "latency": 12.06,
+    "output": "Timeout (>8s)"
+  },
+  {
+    "model": "google/recurrentgemma-2b",
+    "status": "HTTP 404",
+    "latency": 0.06,
+    "output": "Not Found"
+  },
+  {
+    "model": "ibm/granite-3.0-3b-a800m-instruct",
+    "status": "HTTP 404",
+    "latency": 0.11,
+    "output": "Not Found"
+  },
+  {
+    "model": "ibm/granite-3.0-8b-instruct",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "ibm/granite-34b-code-instruct",
+    "status": "HTTP 404",
+    "latency": 0.11,
+    "output": "Not Found"
+  },
+  {
+    "model": "ibm/granite-8b-code-instruct",
+    "status": "HTTP 404",
+    "latency": 0.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "meta/codellama-70b",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "meta/llama-3.2-11b-vision-instruct",
+    "status": "WORKING (200 OK)",
+    "latency": 0.28,
+    "output": "OK"
+  },
+  {
+    "model": "meta/llama-3.2-90b-vision-instruct",
+    "status": "WORKING (200 OK)",
+    "latency": 2.84,
+    "output": "OK"
+  },
+  {
+    "model": "meta/llama-guard-4-12b",
+    "status": "TIMEOUT/ERROR",
+    "latency": 12.06,
+    "output": "Timeout (>8s)"
+  },
+  {
+    "model": "meta/llama2-70b",
+    "status": "HTTP 404",
+    "latency": 0.1,
+    "output": "Not Found"
+  },
+  {
+    "model": "meta/muse-glimmer-30b",
+    "status": "TIMEOUT/ERROR",
+    "latency": 1.47,
+    "output": "'NoneType' object has no attribute "
+  },
+  {
+    "model": "microsoft/kosmos-2",
+    "status": "HTTP 404",
+    "latency": 0.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "microsoft/phi-3-vision-128k-instruct",
+    "status": "HTTP 404",
+    "latency": 0.11,
+    "output": "Not Found"
+  },
+  {
+    "model": "microsoft/phi-3.5-moe-instruct",
+    "status": "HTTP 404",
+    "latency": 0.1,
+    "output": "Not Found"
+  },
+  {
+    "model": "mistralai/codestral-22b-instruct-v0.1",
+    "status": "HTTP 404",
+    "latency": 0.12,
+    "output": "Not Found"
+  },
+  {
+    "model": "mistralai/mistral-7b-instruct-v0.3",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "mistralai/mistral-large",
+    "status": "HTTP 404",
+    "latency": 0.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "mistralai/mistral-large-2-instruct",
+    "status": "HTTP 404",
+    "latency": 0.06,
+    "output": "Not Found"
+  },
+  {
+    "model": "mistralai/mixtral-8x22b-v0.1",
+    "status": "HTTP 404",
+    "latency": 0.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "moonshotai/kimi-k2.6",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "moonshotai/kimi-k3",
+    "status": "TIMEOUT/ERROR",
+    "latency": 12.07,
+    "output": "Timeout (>8s)"
+  },
+  {
+    "model": "nv-mistralai/mistral-nemo-12b-instruct",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/ai-synthetic-video-detector",
+    "status": "HTTP 500",
+    "latency": 0.21,
+    "output": "Internal Server Error"
+  },
+  {
+    "model": "nvidia/cosmos-reason2-8b",
+    "status": "HTTP 404",
+    "latency": 0.06,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/embed-qa-4",
+    "status": "HTTP 404",
+    "latency": 0.06,
+    "output": "404 page not found\n"
+  },
+  {
+    "model": "nvidia/ising-calibration-1.5-31b",
+    "status": "WORKING (200 OK)",
+    "latency": 0.29,
+    "output": "OK"
+  },
+  {
+    "model": "nvidia/llama-3.1-nemoguard-8b-content-safety",
+    "status": "TIMEOUT/ERROR",
+    "latency": 12.06,
+    "output": "Timeout (>8s)"
+  },
+  {
+    "model": "nvidia/llama-3.1-nemoguard-8b-topic-control",
+    "status": "HTTP 500",
+    "latency": 0.24,
+    "output": "{\"error\":\"Error during inference of requ"
+  },
+  {
+    "model": "nvidia/llama-3.1-nemotron-51b-instruct",
+    "status": "HTTP 404",
+    "latency": 0.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/llama-3.1-nemotron-70b-instruct",
+    "status": "HTTP 404",
+    "latency": 0.1,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+    "status": "WORKING (200 OK)",
+    "latency": 0.92,
+    "output": "{\"User Safety\": \"safe\"}"
+  },
+  {
+    "model": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+    "status": "HTTP 404",
+    "latency": 0.1,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+    "status": "HTTP 404",
+    "latency": 0.11,
+    "output": "404 page not found\n"
+  },
+  {
+    "model": "nvidia/llama-3.2-nv-embedqa-1b-v1",
+    "status": "HTTP 404",
+    "latency": 0.06,
+    "output": "404 page not found\n"
+  },
+  {
+    "model": "nvidia/llama-nemotron-embed-vl-1b-v2",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "404 page not found\n"
+  },
+  {
+    "model": "nvidia/llama3-chatqa-1.5-70b",
+    "status": "HTTP 404",
+    "latency": 0.11,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/mistral-nemo-minitron-8b-8k-instruct",
+    "status": "HTTP 404",
+    "latency": 0.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/nemotron-3-embed-1b",
+    "status": "HTTP 404",
+    "latency": 0.12,
+    "output": "404 page not found\n"
+  },
+  {
+    "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "status": "WORKING (200 OK)",
+    "latency": 1.7,
+    "output": "OK"
+  },
+  {
+    "model": "nvidia/nemotron-3-super-120b-a12b",
+    "status": "TIMEOUT/ERROR",
+    "latency": 3.89,
+    "output": "'NoneType' object has no attribute "
+  },
+  {
+    "model": "nvidia/nemotron-3-ultra-550b-a55b",
+    "status": "WORKING (200 OK)",
+    "latency": 7.44,
+    "output": "The user wants me to respond with a single word: \"OK\"."
+  },
+  {
+    "model": "nvidia/nemotron-3.5-content-safety",
+    "status": "WORKING (200 OK)",
+    "latency": 0.39,
+    "output": "User Safety: safe"
+  },
+  {
+    "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "status": "TIMEOUT/ERROR",
+    "latency": 12.05,
+    "output": "Timeout (>8s)"
+  },
+  {
+    "model": "nvidia/nemotron-4-340b-instruct",
+    "status": "HTTP 404",
+    "latency": 0.28,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/nemotron-4-340b-reward",
+    "status": "HTTP 404",
+    "latency": 1.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/nemotron-nano-3-30b-a3b",
+    "status": "HTTP 404",
+    "latency": 0.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/nemotron-parse",
+    "status": "HTTP 400",
+    "latency": 0.21,
+    "output": "{\"object\":\"error\",\"message\":\"Content can"
+  },
+  {
+    "model": "nvidia/nemotron-parse-2.0",
+    "status": "WORKING (200 OK)",
+    "latency": 0.21,
+    "output": "_\\: :::::::::::"
+  },
+  {
+    "model": "nvidia/neva-22b",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/nv-embedqa-mistral-7b-v2",
+    "status": "HTTP 404",
+    "latency": 0.04,
+    "output": "404 page not found\n"
+  },
+  {
+    "model": "nvidia/nvclip",
+    "status": "HTTP 404",
+    "latency": 0.06,
+    "output": "404 page not found\n"
+  },
+  {
+    "model": "nvidia/riva-translate-4b-instruct",
+    "status": "HTTP 404",
+    "latency": 0.07,
+    "output": "Not Found"
+  },
+  {
+    "model": "nvidia/riva-translate-4b-instruct-v1.1",
+    "status": "WORKING (200 OK)",
+    "latency": 0.3,
+    "output": "Respond with the single word: OK"
+  },
+  {
+    "model": "nvidia/riva-translate-4b-instruct-v2",
+    "status": "WORKING (200 OK)",
+    "latency": 1.27,
+    "output": "Respond with the single word: OK"
+  },
+  {
+    "model": "nvidia/vila",
+    "status": "HTTP 404",
+    "latency": 0.09,
+    "output": "Not Found"
+  },
+  {
+    "model": "openai/gpt-oss-20b",
+    "status": "TIMEOUT/ERROR",
+    "latency": 0.75,
+    "output": "'NoneType' object has no attribute "
+  },
+  {
+    "model": "poolside/laguna-xs-2.1",
+    "status": "WORKING (200 OK)",
+    "latency": 2.09,
+    "output": "OK"
+  },
+  {
+    "model": "snowflake/arctic-embed-l",
+    "status": "HTTP 404",
+    "latency": 0.07,
+    "output": "404 page not found\n"
+  },
+  {
+    "model": "writer/palmyra-creative-122b",
+    "status": "HTTP 404",
+    "latency": 0.08,
+    "output": "Not Found"
+  },
+  {
+    "model": "writer/palmyra-fin-70b-32k",
+    "status": "HTTP 404",
+    "latency": 0.07,
+    "output": "Not Found"
+  },
+  {
+    "model": "writer/palmyra-med-70b",
+    "status": "HTTP 404",
+    "latency": 0.1,
+    "output": "Not Found"
+  },
+  {
+    "model": "writer/palmyra-med-70b-32k",
+    "status": "HTTP 404",
+    "latency": 0.1,
+    "output": "Not Found"
+  },
+  {
+    "model": "z-ai/glm-5.3",
+    "status": "TIMEOUT/ERROR",
+    "latency": 12.04,
+    "output": "Timeout (>8s)"
+  },
+  {
+    "model": "z-ai/glm-5.3-flash",
+    "status": "TIMEOUT/ERROR",
+    "latency": 12.08,
+    "output": "Timeout (>8s)"
+  },
+  {
+    "model": "zyphra/zamba2-7b-instruct",
+    "status": "HTTP 404",
+    "latency": 0.11,
+    "output": "Not Found"
+  }
+]
