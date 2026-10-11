@@ -60,3 +60,29 @@ class Hospital(Base):
 
     # Cost information from directory
     tariff_range = Column(Text, nullable=True)
+
+    # --- Provenance & enrichment added by GET /hospitals/discover ---------
+    # `source` records who owns the row: 'csv_import' for the national
+    # directory load, otherwise the provider that discovered it ('overpass',
+    # 'geoapify'). The CSV importer rebuilds this table from a DataFrame that
+    # has no such column, so main.py re-adds these three idempotently on every
+    # startup -- see _ensure_discovery_columns().
+    source = Column(String, nullable=False, default="csv_import", server_default="csv_import")
+
+    # Provider-native id (e.g. 'osm/way/123456', a Geoapify place_id). Lets a
+    # repeat search recognise a facility it already stored even if the mapped
+    # name changed or the coordinates drifted slightly.
+    external_id = Column(String, nullable=True, index=True)
+
+    # OSM opening_hours, stored so the UI can render a truthful 'Open Now'
+    # badge. Never invent this string; absent means absent.
+    opening_hours = Column(String, nullable=True)
+
+    # --- Reputation (nullable by design) ---------------------------------
+    # The national directory carries no user-generated ratings, so these stay
+    # NULL until a real source (Google Places, Practo, etc.) loads them. When
+    # NULL the UI must NOT invent stars -- it shows an inferred reputation
+    # derived from name/accreditation/facilities instead. See
+    # app.api.ai_analysis.infer_reputation.
+    rating = Column(Float, nullable=True)         # 0.0 - 5.0, real source only
+    review_count = Column(Integer, nullable=True)  # real source only

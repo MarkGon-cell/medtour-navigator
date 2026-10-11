@@ -1,6 +1,8 @@
+import os
+
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,11 @@ router = APIRouter(
     tags=["Hospital Queue"],
 )
 
+# Queue figures feed the waiting-time predictor. Allowing anonymous writes
+# would let anyone publish "0 doctors available" for any facility, so this
+# is gated the same way as POST /hospitals/. Reads stay public.
+HOSPITAL_WRITE_KEY = os.getenv("HOSPITAL_WRITE_KEY")
+
 
 class QueueStatusRequest(BaseModel):
     department: str | None = None
@@ -26,8 +33,15 @@ class QueueStatusRequest(BaseModel):
 def update_queue_status(
     hospital_id: int,
     request: QueueStatusRequest,
+    x_hospital_write_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ):
+    if not HOSPITAL_WRITE_KEY or x_hospital_write_key != HOSPITAL_WRITE_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail="Queue updates require a valid hospital write key.",
+        )
+
     hospital = (
         db.query(Hospital)
         .filter(Hospital.id == hospital_id)

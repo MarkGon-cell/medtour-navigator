@@ -10,6 +10,7 @@ import {
   LogOut,
   Menu,
   X,
+  Shield,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,8 @@ const items = [
   { to: "/dashboard", label: "AI Match", icon: Sparkles, hash: "ai" },
   { to: "/dashboard", label: "Nearby", icon: MapPin, hash: "nearby" },
   { to: "/dashboard", label: "Appointments", icon: Calendar, hash: "appts" },
+  { to: "/appointments", label: "My Appointments", icon: Calendar, exact: true },
+  { to: "/admin", label: "Admin Moderation", icon: Shield },
 ];
 
 export function DashboardSidebar({ className = "" }) {
@@ -134,8 +137,8 @@ export function DashboardSidebar({ className = "" }) {
         </Link>
 
         <Link
-          to="/login"
-          title={collapsed ? "Sign out" : undefined}
+          to="/"
+          title={collapsed ? "Emergency Gateway" : undefined}
           className={cn(
             "flex items-center rounded-xl py-2.5 text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent",
             collapsed

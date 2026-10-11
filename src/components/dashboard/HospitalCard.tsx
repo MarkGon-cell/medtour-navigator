@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { MapPin, Navigation, Phone, BedDouble, Siren, Sparkles } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
+
+import { HospitalAiDialog } from "@/components/dashboard/HospitalAiDialog";
 
 type Hospital = {
   id: number;
@@ -32,8 +35,23 @@ interface HospitalCardProps {
 export function HospitalCard({ hospital }: HospitalCardProps) {
   const navigate = useNavigate();
 
+  // Clicking anywhere on the card asks Google AI for more on this hospital.
+  const [showAi, setShowAi] = useState(false);
+
+  // Google Maps turn-by-turn navigation to the facility coordinates.
   const handleNavigate = () => {
-    const url = `https://www.openstreetmap.org/?mlat=${hospital.latitude}&mlon=${hospital.longitude}#map=16/${hospital.latitude}/${hospital.longitude}`;
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${hospital.latitude},${hospital.longitude}`;
+    window.open(url, "_blank");
+  };
+
+  // The national directory carries a phone number for only a fraction of
+  // facilities (see docs/architecture.md), so "Call" looks the hospital up
+  // on Google instead of dialling a number that may not exist.
+  const handleCall = () => {
+    const query = [hospital.name, hospital.city, hospital.state]
+      .filter(Boolean)
+      .join(" ");
+    const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
     window.open(url, "_blank");
   };
 
@@ -44,7 +62,19 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
   };
 
   return (
-    <div className="group rounded-2xl border border-border bg-card p-5 shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Google AI overview for ${hospital.name}`}
+      onClick={() => setShowAi(true)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          setShowAi(true);
+        }
+      }}
+      className="group cursor-pointer rounded-2xl border border-border bg-card p-5 shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-visible:outline-2 focus-visible:outline-primary"
+    >
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
@@ -157,25 +187,65 @@ export function HospitalCard({ hospital }: HospitalCardProps) {
         </p>
       )}
 
+      {/* Hint that the whole card is clickable */}
+      <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Sparkles className="h-3 w-3 shrink-0 text-primary" />
+        Tap the card for a Google AI overview of this hospital
+      </p>
+
       {/* Actions */}
-      <div className="mt-5 flex gap-2">
+      <div className="mt-3 grid grid-cols-3 gap-2">
         <button
           type="button"
-          onClick={handleDetails}
-          className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          onClick={(event) => {
+            event.stopPropagation();
+            handleCall();
+          }}
+          title="Google this hospital to reach it"
+          className="flex items-center justify-center gap-1.5 rounded-xl border border-border px-2 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
         >
-          View Details
+          <Phone className="h-4 w-4 shrink-0" />
+          Call
         </button>
 
         <button
           type="button"
-          onClick={handleNavigate}
-          className="flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          onClick={(event) => {
+            event.stopPropagation();
+            handleDetails();
+          }}
+          className="rounded-xl border border-border px-2 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
         >
-          <Navigation className="h-4 w-4" />
-          Navigate
+          Details
+        </button>
+
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            handleNavigate();
+          }}
+          title="Directions in Google Maps"
+          className="flex items-center justify-center gap-1.5 rounded-xl bg-primary px-2 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <Navigation className="h-4 w-4 shrink-0" />
+          Directions
         </button>
       </div>
+
+      {/* Google AI overview, opened by clicking the card */}
+      <HospitalAiDialog
+        hospital={
+          showAi
+            ? {
+                name: hospital.name,
+                city: hospital.city,
+                state: hospital.state,
+              }
+            : null
+        }
+        onClose={() => setShowAi(false)}
+      />
     </div>
   );
 }

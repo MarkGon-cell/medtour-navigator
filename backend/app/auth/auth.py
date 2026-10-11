@@ -1,3 +1,16 @@
+"""
+DEPRECATED ROUTER — mounted, but nothing in the redesigned frontend links to it.
+
+docs/FRONTEND.md section 1 makes the app guest-first: sign-in is never required
+to reach SOS, the walk-in directory, or the visit ledger. These two routes are
+kept only so an existing client with a stored token can still use
+`/profile` and `/appointments/{id}/status`; they are not part of the product
+flow and must not be promoted in navigation.
+
+Do not add new functionality here. Delete together with /appointments and
+/profile once the frontend drops its token handling (project_progress.md).
+"""
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 

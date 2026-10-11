@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "@tanstack/react-router";
 import api from "@/lib/api";
+import { addHistory } from "@/lib/history";
 
 type HospitalSearchResult = {
   id: number;
@@ -85,18 +86,29 @@ export function SearchBar({
   }, []);
 
   const handleSearch = () => {
-    if (!query.trim()) return;
+    const term = query.trim();
+    if (!term) return;
 
+    addHistory({ kind: "search", label: term });
     setShowResults(true);
   };
 
-  const handleHospitalClick = (hospitalId: number) => {
+  const handleHospitalClick = (hospital: HospitalSearchResult) => {
+    addHistory({
+      kind: "hospital",
+      label: hospital.name,
+      detail: [hospital.city || hospital.district, hospital.state]
+        .filter(Boolean)
+        .join(", "),
+      hospitalId: hospital.id,
+    });
+
     setQuery("");
     setResults([]);
     setShowResults(false);
 
     navigate({
-      to: `/hospital-details/${hospitalId}`,
+      to: `/hospital-details/${String(hospital.id)}`,
     });
   };
 
@@ -150,7 +162,7 @@ export function SearchBar({
                 <button
                   key={hospital.id}
                   type="button"
-                  onClick={() => handleHospitalClick(hospital.id)}
+                  onClick={() => handleHospitalClick(hospital)}
                   className="flex w-full items-start gap-3 rounded-xl p-3 text-left transition-colors hover:bg-muted"
                 >
                   <div className="mt-1 rounded-lg bg-primary/10 p-2">

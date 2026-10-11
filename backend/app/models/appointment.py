@@ -89,4 +89,5 @@ class Appointment(Base):
         nullable=False,
     )
 
-    hospital = relationship("Hospital")
+    hospital = relationship("Hospital", lazy="joined")
+    user = relationship("User", lazy="joined")

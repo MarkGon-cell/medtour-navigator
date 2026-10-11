@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
-import { Button } from "@/components/ui/button";
-import { HeartPulse, Menu, X } from "lucide-react";
+import { Menu, X, ShieldAlert } from "lucide-react";
 import { useState } from "react";
+import { ProfileMenu } from "@/components/site/ProfileMenu";
 
 const links = [
   { to: "/", label: "Home" },
@@ -14,46 +14,80 @@ const links = [
 export function Navbar() {
   const [open, setOpen] = useState(false);
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-border/60 bg-background/80 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground shadow-soft">
-            <HeartPulse className="h-5 w-5" />
+    <header className="fixed top-0 z-50 w-full px-3 py-3 sm:px-6">
+      {/* Pill-shaped navbar bar (mobile + desktop) */}
+      <div
+        className="mx-auto flex h-12 max-w-7xl items-center justify-between gap-2 rounded-full border border-border/60
+                   bg-card/70 px-2.5 sm:px-4
+                   shadow-[0_4px_20px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.15)]
+                   backdrop-blur-md backdrop-saturate-150"
+      >
+        {/* Logo */}
+        <Link to="/" className="flex items-center gap-2 shrink-0 pl-0.5">
+          <div className="grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground shadow-soft">
+            <ShieldAlert className="h-5 w-5" />
           </div>
-          <span className="text-lg font-bold tracking-tight">MedTour</span>
+          <span className="text-lg font-black tracking-tight text-foreground">
+            MedTour
+          </span>
         </Link>
-        <nav className="hidden items-center gap-8 md:flex">
+
+        {/* Desktop Pill Navigation */}
+        <div className="hidden md:flex items-center gap-1 rounded-full bg-muted/40 px-1.5 py-1">
           {links.map((l) => (
-            <a key={l.to} href={l.to} className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
+            <a
+              key={l.to}
+              href={l.to}
+              className="rounded-full px-3.5 py-1.5 text-sm font-medium text-muted-foreground/80
+                        transition-all duration-200 outline-none hover:bg-card/80 hover:text-foreground
+                        focus-visible:text-foreground"
+            >
               {l.label}
             </a>
           ))}
-        </nav>
-        <div className="hidden items-center gap-2 md:flex">
-          <Button asChild variant="ghost"><Link to="/login">Sign in</Link></Button>
-          <Button asChild className="bg-primary text-primary-foreground shadow-soft hover:opacity-95">
-            <Link to="/register">Get Started</Link>
-          </Button>
         </div>
-        <button className="md:hidden" onClick={() => setOpen(!open)} aria-label="Menu">
-          {open ? <X /> : <Menu />}
+
+        {/* Desktop Profile dropdown (Upload Profile & Learn More) */}
+        <div className="hidden md:flex items-center gap-2 shrink-0">
+          <ProfileMenu />
+        </div>
+
+        {/* Mobile menu toggle — pill shaped */}
+        <button
+          className="md:hidden grid h-9 w-9 shrink-0 place-items-center rounded-full border border-border/60
+                     bg-card/60 text-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+          onClick={() => setOpen(!open)}
+          aria-label="Toggle menu"
+          aria-expanded={open}
+        >
+          {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
       </div>
-      {open && (
-        <div className="border-t border-border bg-background md:hidden">
-          <div className="flex flex-col gap-1 p-4">
-            {links.map((l) => (
-              <a key={l.to} href={l.to} onClick={() => setOpen(false)} className="rounded-lg px-3 py-2 text-sm font-medium hover:bg-muted">
-                {l.label}
-              </a>
-            ))}
-            <div className="mt-2 flex gap-2">
-              <Button asChild variant="outline" className="flex-1"><Link to="/login">Sign in</Link></Button>
-              <Button asChild className="flex-1 bg-primary text-primary-foreground"><Link to="/register">Get Started</Link></Button>
-            </div>
+
+      {/* Mobile Drawer — floating pill panel */}
+      <div
+        className={`mx-auto max-w-7xl overflow-hidden rounded-3xl border border-border/60 bg-card/90
+                    backdrop-blur-md shadow-lg md:hidden
+                    transition-[max-height,opacity] duration-300 ease-in-out
+                    ${open ? "mt-2 max-h-[80vh] opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}
+      >
+        <div className="px-3 pb-3 pt-2.5 space-y-1">
+          {links.map((l) => (
+            <a
+              key={l.to}
+              href={l.to}
+              onClick={() => setOpen(false)}
+              className="block rounded-full px-4 py-2.5 text-sm font-medium text-foreground/80 hover:text-foreground
+                        hover:bg-muted/60 transition-all"
+            >
+              {l.label}
+            </a>
+          ))}
+          <div className="pt-2 border-t border-border/60 flex justify-center">
+            <ProfileMenu />
           </div>
         </div>
-      )}
+      </div>
     </header>
   );
 }
