@@ -342,40 +342,76 @@ def _parse_json_from_response(raw: str) -> Dict | None:
     return None
 
 
-def parallel_nim_first_aid(
+# Ordered pool used by every LLM call in the triage pipeline. Laguna is a
+# fast, cheap reasoning model that answers first; the larger Llama/Nemotron
+# models are the correctness fallbacks when Laguna is rate-limited or returns
+# unusable JSON.
+NIM_MODELS = [
+    "poolside/laguna-xs-2.1",
+    "meta/llama-3.2-11b-vision-instruct",
+    "meta/llama-3.1-70b-instruct",
+    "nvidia/nemotron-4-340b-instruct",
+]
+
+
+def nim_generate_json(
     api_key: str,
     system_prompt: str,
     user_message: str,
-    n_parallel: int = 2,
-    per_model_timeout: float = 3.0,
+    expect_key: str,
+    models=None,
+    per_model_timeout: float = 8.0,
+    max_retries: int = 1,
 ) -> Dict | None:
     """
-    Fires fast parallel NIM calls across top working models.
-    Returns first valid JSON response that contains 'firstAid'.
+    Fire parallel NIM calls and return the first valid JSON object that
+    contains `expect_key`.
+
+    Used by BOTH triage AI calls (first aid drafting and hospital curation):
+    Laguna leads, larger models back it up, and a retry pass covers transient
+    429/5xx. Returns None only when every model failed twice, so callers keep
+    a deterministic fallback.
     """
-    models_to_try = [
-        "poolside/laguna-xs-2.1",
-        "meta/llama-3.2-11b-vision-instruct",
-        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
-    ]
+    models_to_try = list(models or NIM_MODELS)
 
     def _worker(model: str):
         raw_resp = _call_nim_model(model, api_key, system_prompt, user_message, per_model_timeout)
         if raw_resp:
             content = raw_resp.get("choices", [{}])[0].get("message", {}).get("content", "")
             parsed = _parse_json_from_response(content)
-            if parsed and "firstAid" in parsed:
+            if parsed and expect_key in parsed:
                 return parsed
         return None
 
-    with ThreadPoolExecutor(max_workers=len(models_to_try)) as executor:
-        futures = {executor.submit(_worker, model): model for model in models_to_try}
-        try:
-            for future in as_completed(futures, timeout=per_model_timeout + 0.5):
-                res = future.result()
-                if res:
-                    return res
-        except Exception:
-            pass
-
+    for _attempt in range(max_retries + 1):
+        with ThreadPoolExecutor(max_workers=len(models_to_try)) as executor:
+            futures = {executor.submit(_worker, model): model for model in models_to_try}
+            try:
+                for future in as_completed(futures, timeout=per_model_timeout + 1.0):
+                    res = future.result()
+                    if res:
+                        return res
+            except Exception:
+                pass
     return None
+
+
+def parallel_nim_first_aid(
+    api_key: str,
+    system_prompt: str,
+    user_message: str,
+    n_parallel: int = 2,
+    per_model_timeout: float = 8.0,
+) -> Dict | None:
+    """
+    Fires fast parallel NIM calls across top working models.
+    Returns first valid JSON response that contains 'firstAid'.
+    """
+    return nim_generate_json(
+        api_key=api_key,
+        system_prompt=system_prompt,
+        user_message=user_message,
+        expect_key="firstAid",
+        per_model_timeout=per_model_timeout,
+        max_retries=1,
+    )

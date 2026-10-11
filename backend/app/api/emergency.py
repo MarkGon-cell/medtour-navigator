@@ -1,22 +1,57 @@
+"""
+Emergency endpoints.
+
+SOS dispatch contract:
+    Tapping SOS does two things at once on the client:
+        1. opens tel:112 -- the real emergency channel, works with no network;
+        2. POSTs /emergency/sos here, which curates WHERE the ambulance should
+           go: it finds the nearest emergency-capable hospital from Postgres +
+           Overpass + Geoapify, computes the route and ETA from the caller's
+           GPS, and returns a dispatch packet (name, phone, address, distance,
+           ETA, Google Maps route link).
+
+    MedTour has no ambulance-partner API, so this is a dispatch *packet* for
+    the nearest ER -- not a claim that a vehicle was paged. The 112 call is
+    the actual emergency summoning; this endpoint tells the caller and their
+    driver where to go.
+"""
+
+import logging
 import os
-import json
-import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-
-if hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-    except Exception:
-        pass
+from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_optional_current_user
+from app.database.database import get_db
+from app.models.hospital import Hospital
 from app.models.user import User
+from app.services import discovery
+from app.services.geo import haversine_km
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/emergency", tags=["Emergency"])
+
+# Headline numbers, surfaced so the client can render them and keep working
+# offline. The current client hardcodes these too, for offline reliability.
+EMERGENCY_NUMBERS = {
+    "national_emergency": "112",
+    "ambulance": "108",
+    "police": "100",
+    "fire": "101",
+}
+
+# Average urban ambulance speed used for the ETA estimate (km/h). City traffic
+# with signal priority assumed; a coarse estimate, not a routing engine.
+_AVG_AMBULANCE_SPEED_KMH = 35.0
+# Search radius for the nearest emergency-capable hospital on the SOS path.
+_SOS_RADIUS_KM = 25.0
+# Straight-line distance is shorter than road distance; pad ETA accordingly.
+_ROUTE_PADDING = 1.3
 
 
 class SOSRequest(BaseModel):
@@ -28,86 +63,205 @@ class SOSRequest(BaseModel):
     contact_emergency_services: bool = True
 
 
-SOS_LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "sos_logs")
-os.makedirs(SOS_LOG_DIR, exist_ok=True)
+def _estimate_eta_minutes(distance_km: float) -> int:
+    road_km = distance_km * _ROUTE_PADDING
+    minutes = (road_km / _AVG_AMBULANCE_SPEED_KMH) * 60.0
+    # Never show less than a minute; cap runaway estimates.
+    return max(1, min(int(round(minutes)), 90))
 
 
-def _write_sos_json(record: dict) -> str:
-    timestamp = record["timestamp"]
-    clean_ts = timestamp.replace(":", "-").replace(" ", "_")
-    filename = f"sos_{clean_ts}.json"
-    path = os.path.join(SOS_LOG_DIR, filename)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(record, f, indent=2)
-    return path
+def _find_nearest_emergency_hospital(
+    db: Session,
+    latitude: float,
+    longitude: float,
+) -> Optional[dict]:
+    """
+    Nearest emergency-capable hospital from Postgres + Overpass + Geoapify.
+
+    Returns a dict with the hospital's contact block, distance and ETA, or
+    None when nothing emergency-capable is found within _SOS_RADIUS_KM.
+    Never raises -- a dead provider must not block the SOS acknowledgement.
+    """
+    candidates: list[dict] = []
+
+    def _is_general_or_multispeciality(name: str, specialties: str = "", category: str = "") -> bool:
+        text = f"{name} {specialties} {category}".lower()
+        positive = [
+            "multi", "general", "civil hospital", "district hospital",
+            "tertiary", "trauma", "casualty", "government hospital",
+            "govt hospital", "medical college", "acute care", "critical care",
+            "emergency care", "mission hospital", "community health centre", "chc"
+        ]
+        return any(k in text for k in positive)
+
+    def _is_disqualified_clinic(name: str, specialties: str = "", category: str = "") -> bool:
+        text = f"{name} {specialties} {category}".lower()
+        if any(k in text for k in ["multi", "general", "civil", "district", "trauma", "medical college"]):
+            return False
+        disqualifiers = [
+            "eye", "ophthal", "dental", "dentist", "skin", "derma", "cosmetic",
+            "urology", "physio", "ayurved", "homeo", "fertility", "ivf",
+            "day care", "outpatient clinic", "dispensary"
+        ]
+        return any(k in text for k in disqualifiers)
+
+    def _consider(name, lat, lon, phone, address, city, emergency, specialties="", category=""):
+        if not emergency:
+            return
+        if _is_disqualified_clinic(name or "", specialties or "", category or ""):
+            return
+        dist = haversine_km(latitude, longitude, lat, lon)
+        if dist > _SOS_RADIUS_KM:
+            return
+
+        is_gen_multi = _is_general_or_multispeciality(name or "", specialties or "", category or "")
+        candidates.append({
+            "name": name,
+            "address": address,
+            "city": city,
+            "phone": phone,
+            "latitude": lat,
+            "longitude": lon,
+            "distance_km": round(dist, 2),
+            "eta_minutes": _estimate_eta_minutes(dist),
+            "is_general_or_multispeciality": is_gen_multi,
+            "google_maps_route": (
+                f"https://www.google.com/maps/dir/?api=1"
+                f"&origin={latitude},{longitude}&destination={lat},{lon}"
+                f"&travelmode=driving"
+            ),
+        })
+
+    # --- Source 1: local Postgres directory (bbox pre-filter).
+    try:
+        min_lat, max_lat, min_lon, max_lon = discovery.bounding_box(
+            latitude, longitude, _SOS_RADIUS_KM
+        )
+        local_rows = (
+            db.query(Hospital)
+            .filter(
+                Hospital.latitude >= min_lat,
+                Hospital.latitude <= max_lat,
+                Hospital.longitude >= min_lon,
+                Hospital.longitude <= max_lon,
+            )
+            .all()
+        )
+        for h in local_rows:
+            if h.latitude and h.longitude:
+                _consider(
+                    h.name, h.latitude, h.longitude, h.phone,
+                    h.address, h.city, h.emergency_available,
+                    specialties=h.specialties or "",
+                    category=h.category or "",
+                )
+    except Exception as e:
+        logger.warning("SOS Postgres lookup failed: %s", e)
+
+    # --- Sources 2 & 3: Overpass + Geoapify (cached by discovery). persist=False
+    #     keeps the urgent SOS path read-only; fast=True bounds a dead Overpass
+    #     to seconds so dispatch can never hang on flaky mirrors.
+    try:
+        merged = discovery.discover(
+            db, latitude, longitude, _SOS_RADIUS_KM,
+            persist=False, limit=discovery.MAX_RESULTS, fast=True,
+        )
+        for row in merged.get("results", []):
+            lat, lon = row.get("latitude"), row.get("longitude")
+            if lat is None or lon is None:
+                continue
+            _consider(
+                row.get("name"), lat, lon, row.get("phone"),
+                row.get("address"), row.get("city"),
+                row.get("emergency_available"),
+                specialties=row.get("specialties") or "",
+                category=row.get("category") or "",
+            )
+    except Exception as e:
+        logger.warning("SOS Overpass/Geoapify discovery failed: %s", e)
+
+    if not candidates:
+        return None
+
+    # Sort candidates prioritizing General / Multi-speciality hospitals for immediate resuscitation
+    candidates.sort(
+        key=lambda c: (
+            0 if c.get("is_general_or_multispeciality") else 1,
+            c["distance_km"],
+        )
+    )
+
+    return candidates[0]
 
 
 @router.post("/sos")
 def trigger_sos(
     req: SOSRequest,
-    current_user: Optional[User] = Depends(get_optional_current_user)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user),
 ):
-    now = datetime.utcnow().isoformat() + "Z"
-    user_email = current_user.email if current_user else "Anonymous / Guest"
-    user_name = current_user.full_name if current_user and hasattr(current_user, "full_name") else "Anonymous"
+    """
+    Curate the ambulance destination for an SOS.
 
-    record = {
-        "timestamp": now,
-        "user_id": current_user.id if current_user else None,
-        "user_name": user_name,
-        "email": user_email,
-        "latitude": req.latitude,
-        "longitude": req.longitude,
-        "address": req.address,
-        "pincode": req.pincode,
-        "message": req.message or "Immediate emergency assistance required",
-        "contact_emergency_services": req.contact_emergency_services,
-    }
+    Finds the nearest emergency-capable hospital (Postgres + Overpass +
+    Geoapify) and returns a dispatch packet: where to go, how far, ETA, the
+    hospital phone, and a Google Maps route from the caller's GPS. The client
+    opens tel:112 alongside this call; together they let the caller summon
+    help AND route it to the right hospital.
+    """
+    logger.info(
+        "SOS dispatch requested by %s at (%s, %s)",
+        current_user.email if current_user else "guest",
+        req.latitude, req.longitude,
+    )
 
-    log_path = _write_sos_json(record)
-    gmaps_url = f"https://www.google.com/maps?q={req.latitude},{req.longitude}"
+    now = datetime.now(timezone.utc)
 
-    # Stream structured output to backend terminal logs without emoji encoding errors
-    log_banner = f"""
-======================================================================
-[EMERGENCY SOS ALERT RECEIVED]
-----------------------------------------------------------------------
-Timestamp       : {now}
-User            : {user_name} ({user_email})
-Location Name   : {req.address}
-Pincode         : {req.pincode or 'Not specified'}
-Coordinates     : Latitude: {req.latitude}, Longitude: {req.longitude}
-Google Maps Link: {gmaps_url}
-SOS Message     : {req.message or 'Immediate medical assistance needed'}
-Ambulance Req.  : {'[YES] DISPATCH REQUESTED' if req.contact_emergency_services else '[NO]'}
-Saved Log File  : {log_path}
-======================================================================
-"""
-    try:
-        print(log_banner, flush=True)
-    except Exception:
-        pass
+    hospital = _find_nearest_emergency_hospital(db, req.latitude, req.longitude)
 
-    ambulance_dispatch = {
-        "simulated": True,
-        "status": "DISPATCH_INITIATED" if req.contact_emergency_services else "NOT_REQUESTED",
-        "eta_minutes": 8 if req.contact_emergency_services else None,
-        "nearest_ambulance_service": "108 Emergency Medical Services",
-        "gmaps_url": gmaps_url,
-        "log_path": log_path,
-    }
+    if hospital:
+        return {
+            "status": "dispatched",
+            "dispatched": True,
+            "message": (
+                f"Nearest emergency hospital: {hospital['name']}. "
+                "Call 112 from your phone for ambulance dispatch."
+            ),
+            "emergency_numbers": EMERGENCY_NUMBERS,
+            "origin": {
+                "latitude": req.latitude,
+                "longitude": req.longitude,
+                "address": req.address,
+                "pincode": req.pincode,
+                "google_maps": (
+                    f"https://www.google.com/maps?q={req.latitude},{req.longitude}"
+                ),
+            },
+            "destination": hospital,
+            "message_from_user": req.message,
+            "timestamp": now.isoformat().replace("+00:00", "Z"),
+        }
 
+    # No emergency-capable hospital found in radius: still return an honest
+    # acknowledgement with the caller's location and the numbers to dial.
     return {
-        "status": "success",
-        "message": "SOS alert received and emergency dispatch logged",
-        "timestamp": now,
-        "location": {
+        "status": "acknowledged",
+        "dispatched": False,
+        "message": (
+            "No emergency hospital found within "
+            f"{_SOS_RADIUS_KM:.0f} km. Call 112 from your phone."
+        ),
+        "emergency_numbers": EMERGENCY_NUMBERS,
+        "origin": {
             "latitude": req.latitude,
             "longitude": req.longitude,
             "address": req.address,
             "pincode": req.pincode,
-            "google_maps": gmaps_url
+            "google_maps": (
+                f"https://www.google.com/maps?q={req.latitude},{req.longitude}"
+            ),
         },
-        "ambulance": ambulance_dispatch,
-        "log_path": log_path,
+        "destination": None,
+        "message_from_user": req.message,
+        "timestamp": now.isoformat().replace("+00:00", "Z"),
     }

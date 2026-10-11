@@ -1,53 +1,64 @@
-import { HeartPulse, Github, Twitter, Linkedin } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 
-export function Footer() {
+interface FooterProps {
+  isTech?: boolean;
+}
+
+export function Footer({ isTech = false }: FooterProps) {
   return (
-    <footer id="contact" className="border-t border-border bg-muted/30">
-      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-4">
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground">
-              <HeartPulse className="h-5 w-5" />
-            </div>
-            <span className="text-lg font-bold">MedTour</span>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            AI-powered healthcare navigation for travellers in India.
-          </p>
-          <div className="flex gap-3 pt-2 text-muted-foreground">
-            <Twitter className="h-5 w-5 hover:text-foreground" />
-            <Linkedin className="h-5 w-5 hover:text-foreground" />
-            <Github className="h-5 w-5 hover:text-foreground" />
-          </div>
+    <footer className={`border-t py-12 transition-colors duration-500 ${
+      isTech 
+        ? "border-neutral-800 text-neutral-400" 
+        : "border-gray-100 text-gray-500"
+    }`}>
+      <div className="max-w-4xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-6 text-xs font-mono">
+        
+        {/* Brand & Mission Statement */}
+        <div className="flex items-center gap-3">
+          <span className={`font-black text-sm tracking-tight transition-colors ${
+            isTech ? "text-white" : "text-black"
+          }`}>
+            MedTour
+          </span>
+          <span className="opacity-30">/</span>
+          <span className="text-[11px] font-normal tracking-wide">
+            {isTech ? "Deterministic Healthcare Gateway" : "Emergency Assistance in India"}
+          </span>
         </div>
-        <div>
-          <h4 className="mb-3 text-sm font-semibold">Product</h4>
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            <li><a href="/#features">Features</a></li>
-            <li><a href="/#how">How it works</a></li>
-            <li><Link to="/dashboard">Dashboard</Link></li>
-          </ul>
+
+        {/* Minimal Text Links */}
+        <div className="flex items-center gap-6">
+          <Link 
+            to="/" 
+            className={`transition-colors ${
+              isTech ? "hover:text-white" : "hover:text-black"
+            }`}
+          >
+            Emergency
+          </Link>
+          <Link 
+            to="/walk-in" 
+            className={`transition-colors ${
+              isTech ? "hover:text-white" : "hover:text-black"
+            }`}
+          >
+            Clinics
+          </Link>
+          <a 
+            href="tel:112" 
+            className={`transition-colors ${
+              isTech ? "hover:text-white" : "hover:text-black"
+            }`}
+          >
+            SOS 112
+          </a>
         </div>
-        <div>
-          <h4 className="mb-3 text-sm font-semibold">Company</h4>
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            <li><a href="/#faq">FAQ</a></li>
-            <li>About</li>
-            <li>Careers</li>
-          </ul>
+
+        {/* Copyright & Open Standard */}
+        <div className="text-[11px] opacity-60">
+          © {new Date().getFullYear()} • Zero Sign-Up
         </div>
-        <div>
-          <h4 className="mb-3 text-sm font-semibold">Contact</h4>
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            <li>support@medtour.example</li>
-            <li>+91 800-000-0000</li>
-            <li>New Delhi, India</li>
-          </ul>
-        </div>
-      </div>
-      <div className="border-t border-border py-4 text-center text-xs text-muted-foreground">
-        © {new Date().getFullYear()} MedTour. All rights reserved.
+
       </div>
     </footer>
   );

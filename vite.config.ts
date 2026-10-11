@@ -25,6 +25,7 @@ export default defineConfig({
         "/ai": "http://127.0.0.1:8000",
         "/emergency": "http://127.0.0.1:8000",
         "/appointments": "http://127.0.0.1:8000",
+        "/admin": "http://127.0.0.1:8000",
         "/waiting-time": "http://127.0.0.1:8000",
         "/waiting-observations": "http://127.0.0.1:8000",
         "/profile": "http://127.0.0.1:8000",

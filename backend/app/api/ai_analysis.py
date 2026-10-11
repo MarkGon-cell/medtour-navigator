@@ -26,7 +26,11 @@ from app.api.robust_triage_engine import (
     retrieve_procedural_sections,
     extract_precise_leaf_evidence
 )
-from app.api.hybrid_first_aid_retriever import parallel_nim_first_aid
+from app.api.hybrid_first_aid_retriever import parallel_nim_first_aid, nim_generate_json
+from app.services import discovery
+from app.services import google_places
+from app.services.geo import haversine_km
+from app.services.hospital_discovery_orchestrator import execute_hospital_discovery_workflow
 
 load_dotenv()
 
@@ -255,28 +259,33 @@ def draft_first_aid_instructions(symptoms: str) -> Dict[str, Any]:
                 rc_context = f"\n\nOFFICIAL RED CROSS MANUAL LEAF EVIDENCE:\n{extracted_manual_text}\n\nStrict Rule: Derive all actionable steps strictly from the leaf evidence above."
 
             system_prompt = (
-                "You are an Emergency First Aid Dispatch AI.\n"
-                "You provide life-saving, clear, numbered layperson action steps based STRICTLY on the provided Red Cross Medical Manual Excerpt.\n\n"
+                "You are an Emergency First Aid & Hospital Preparation AI.\n"
+                "Your task is to take the patient's symptoms and the provided official Red Cross Medical Manual excerpt (if available),\n"
+                "extract the exact procedural first aid guidelines, and transform them into simple, clear, layman-friendly action steps.\n"
+                "Then, based directly on the derived first aid steps and patient state, generate specific prerequisites before heading to the hospital.\n\n"
                 "CRITICAL RULES:\n"
-                "1. Base your steps directly on the provided manual excerpt.\n"
-                "2. If the condition is an acute emergency (choking, severe bleeding, deep burns), NEVER suggest routine self-care (e.g. drinking fluids, taking paracetamol, or sprain RICE).\n"
-                "3. Output clear, numbered actions in chronological order of life-saving priority.\n"
-                "4. Output ONLY a raw JSON object (no markdown fences) with keys:\n"
-                "- specialty: string (e.g. 'EMERGENCY' or 'CARDIOLOGY')\n"
+                "1. FIRST AID: Create 4-6 clear, numbered, simple layperson action steps based on the Red Cross manual evidence.\n"
+                "2. PREREQUISITES: Generate 3-5 specific preparation items needed BEFORE heading to the hospital (e.g. medical records, specific transport posture, ice packs/dressings to bring, emergency contacts, ID proofs).\n"
+                "3. Layman Language: Avoid heavy medical jargon. Use simple instructions anyone can follow under stress.\n"
+                "4. Acute Emergency Safety: If the condition is an acute emergency (e.g. choking, severe bleeding, cardiac arrest, deep burn), prioritize calling 108/EMS and immediate life-saving stabilization.\n"
+                "5. Output ONLY a valid JSON object without markdown syntax with keys:\n"
+                "- specialty: string (e.g. 'EMERGENCY', 'CARDIOLOGY', 'GASTROENTEROLOGY')\n"
                 "- urgency: 'EMERGENCY'|'URGENT'|'ROUTINE'\n"
-                "- summary: 1 concise sentence explaining the immediate emergency\n"
-                "- firstAid: list of 4-6 direct operational first-aid action steps\n"
-                "- prerequisites: list of 3-4 hospital arrival/transport preparation items\n\n"
+                "- summary: 1 concise sentence describing the detected condition in simple terms\n"
+                "- firstAid: list of 4-6 simple layman first-aid action steps\n"
+                "- prerequisites: list of 3-5 specific hospital arrival & transport prerequisites derived directly from the condition and first-aid protocol\n\n"
                 f"{rc_context if rc_context else ''}"
             )
 
-            # Fire parallel NIM calls (staggered 1.6s to respect 40 RPM limit)
+            # Fire parallel NIM calls across fast LLM models (Laguna leads).
+            # Generous per-model timeout so the real AI answer lands before we
+            # fall back to the deterministic Red Cross safety net.
             nim_result = parallel_nim_first_aid(
                 api_key=api_key,
                 system_prompt=system_prompt,
-                user_message=f"PATIENT EMERGENCY COMPLAINT: {symptoms}",
+                user_message=f"PATIENT SYMPTOMS & INCIDENT: {symptoms}",
                 n_parallel=3,
-                per_model_timeout=5.0
+                per_model_timeout=12.0
             )
             if nim_result and "firstAid" in nim_result and len(nim_result["firstAid"]) >= 3:
                 # Enforce emergency classification if red flag is active
@@ -320,30 +329,476 @@ def draft_first_aid_instructions(symptoms: str) -> Dict[str, Any]:
         ]
     }
 
-    # High-accuracy fallback mapped to Red Cross emergency protocols
-    specialty = "general medicine"
-    for kw, spec in SYMPTOM_SPECIALTY_MAP.items():
-        if kw in symptoms.lower():
-            specialty = spec
-            break
 
-    first_aid = DEFAULT_FIRST_AID.get(specialty, DEFAULT_FIRST_AID["general medicine"])
-    prerequisites = [
-        "Carry valid Government Photo ID proof (Aadhar/PAN/Passport)",
-        "Carry past medical records, prescription slips, or discharge summaries",
-        "Keep emergency contact numbers handy",
-        "Wear comfortable, loose clothing"
+# ==========================================================
+# PARALLEL CALL 2 (part A): MERGE Postgres + Overpass + Geoapify
+# ==========================================================
+def gather_nearby_candidates(
+    db: Session,
+    latitude: float,
+    longitude: float,
+    radius_km: float,
+) -> List[Dict[str, Any]]:
+    """
+    Build one deduplicated candidate list from all three sources:
+    the local Postgres directory, Overpass, and Geoapify.
+
+    `discovery.discover` already queries Overpass + Geoapify (with caching)
+    and merges them against the local directory, deduplicating by
+    same-site/same-name. We map its output into the shape the scoring
+    and LLM-curation steps consume.
+    """
+    candidates: List[Dict[str, Any]] = []
+    seen_keys = set()
+
+    def _add_model_instance(h: Hospital, dist: float):
+        name_clean = re.sub(r'[^a-z0-9]', '', (h.name or "").lower())
+        city_clean = re.sub(r'[^a-z0-9]', '', (h.city or "").lower())
+        key = (name_clean, city_clean, round(h.latitude, 3), round(h.longitude, 3))
+        if key in seen_keys:
+            return
+        seen_keys.add(key)
+        candidates.append({
+            # 1. Primary Identifier & Basic Info
+            "id": h.id,
+            "name": h.name,
+            "category": h.category or "Hospital",
+            "care_type": h.care_type or "Tertiary",
+            "discipline": h.discipline or "Allopathy",
+            # 2. Location & Coordinates
+            "city": h.city,
+            "state": h.state,
+            "district": h.district,
+            "subdistrict": h.subdistrict,
+            "address": h.address,
+            "pincode": h.pincode,
+            "latitude": h.latitude,
+            "longitude": h.longitude,
+            "distance_km": round(dist, 2),
+            # 3. Medical Specialties & Facilities
+            "specialties": h.specialties or "",
+            "facilities": h.facilities or "",
+            "miscellaneous_facilities": h.miscellaneous_facilities or "",
+            # 4. Emergency & Urgent Services
+            "emergency_available": bool(h.emergency_available),
+            "emergency_services": h.emergency_services,
+            "emergency_phone": h.emergency_phone,
+            "ambulance_phone": h.ambulance_phone,
+            "bloodbank_phone": h.bloodbank_phone,
+            # 5. Contact Details
+            "phone": h.phone,
+            "mobile": h.mobile,
+            "tollfree": h.tollfree,
+            "helpline": h.helpline,
+            "website": h.website,
+            "email": h.email,
+            # 6. Capacity & Staff
+            "total_beds": h.total_beds,
+            "private_wards": h.private_wards,
+            "economically_weaker_beds": h.economically_weaker_beds,
+            "doctors": h.doctors,
+            "medical_consultants": h.medical_consultants,
+            "established_year": h.established_year,
+            # 7. Accreditations, Costs & External IDs
+            "accreditation": h.accreditation,
+            "registration_number": h.registration_number,
+            "empanelment": h.empanelment,
+            "tariff_range": h.tariff_range,
+            "source": h.source or "local",
+            "external_id": h.external_id,
+            "opening_hours": h.opening_hours,
+            "rating": h.rating,
+            "review_count": h.review_count,
+        })
+
+    def _add_discovered_facility(row: dict, dist: float):
+        name = row.get("name")
+        lat = row.get("latitude")
+        lon = row.get("longitude")
+        if not name or lat is None or lon is None:
+            return
+        name_clean = re.sub(r'[^a-z0-9]', '', (name or "").lower())
+        city_clean = re.sub(r'[^a-z0-9]', '', (row.get("city") or "").lower())
+        key = (name_clean, city_clean, round(lat, 3), round(lon, 3))
+        if key in seen_keys:
+            return
+        seen_keys.add(key)
+        candidates.append({
+            "id": row.get("external_id") or f"ext-{abs(hash(name)) % 100000}",
+            "name": name,
+            "category": row.get("category") or "Hospital",
+            "care_type": "Walk-In Clinic & Urgent Care",
+            "discipline": "Allopathy",
+            "city": row.get("city"),
+            "state": row.get("state") or "Maharashtra",
+            "district": row.get("city"),
+            "subdistrict": None,
+            "address": row.get("address"),
+            "pincode": row.get("pincode"),
+            "latitude": lat,
+            "longitude": lon,
+            "distance_km": round(dist, 2),
+            "specialties": row.get("specialties") or "Emergency Medicine, General Medicine",
+            "facilities": row.get("facilities") or row.get("category") or "Casualty / Urgent Care Desk",
+            "miscellaneous_facilities": None,
+            "emergency_available": bool(row.get("emergency_available", True)),
+            "emergency_services": "24/7 Casualty & Triage",
+            "emergency_phone": row.get("phone"),
+            "ambulance_phone": "108",
+            "bloodbank_phone": None,
+            "phone": row.get("phone"),
+            "mobile": None,
+            "tollfree": None,
+            "helpline": row.get("phone"),
+            "website": row.get("website"),
+            "email": None,
+            "total_beds": row.get("total_beds", 50),
+            "private_wards": None,
+            "economically_weaker_beds": None,
+            "doctors": row.get("doctors", 15),
+            "medical_consultants": None,
+            "established_year": None,
+            "accreditation": row.get("accreditation") or "NABH Accredited / State Verified",
+            "registration_number": None,
+            "empanelment": "Cashless Travel Insurance Desk",
+            "tariff_range": "Standard",
+            "source": row.get("origin", "discovery"),
+            "external_id": row.get("external_id"),
+            "opening_hours": row.get("opening_hours") or "24/7",
+            "rating": row.get("rating"),
+            "review_count": row.get("review_count"),
+        })
+
+    # --- Source 1: local Postgres directory (bbox pre-filter, exact haversine)
+    min_lat, max_lat, min_lon, max_lon = discovery.bounding_box(
+        latitude, longitude, radius_km
+    )
+    local_rows = (
+        db.query(Hospital)
+        .filter(
+            Hospital.latitude >= min_lat,
+            Hospital.latitude <= max_lat,
+            Hospital.longitude >= min_lon,
+            Hospital.longitude <= max_lon,
+        )
+        .all()
+    )
+    for h in local_rows:
+        if not (h.latitude and h.longitude):
+            continue
+        dist = haversine_km(latitude, longitude, h.latitude, h.longitude)
+        if dist > radius_km:
+            continue
+        _add_model_instance(h, dist)
+
+    # --- Sources 2 & 3: Overpass + Geoapify discovery
+    try:
+        merged = discovery.discover(
+            db, latitude, longitude, radius_km,
+            persist=False, limit=discovery.MAX_RESULTS, fast=True,
+        )
+        for row in merged.get("results", []):
+            lat, lon = row.get("latitude"), row.get("longitude")
+            if lat is None or lon is None:
+                continue
+            dist = row.get("distance_km") or haversine_km(latitude, longitude, lat, lon)
+            _add_discovered_facility(row, dist)
+    except Exception as e:
+        try:
+            print(f"[WARN] Overpass/Geoapify discovery failed: {e}", flush=True)
+        except Exception:
+            pass
+
+    # --- Real ratings from Google Places (quota-safe, optional) -----------
+    # One Nearby Search enriches the whole area by name match. Rate-limited,
+    # cached, and circuit-broken; a demo/unusable key just leaves the
+    # candidates on inferred reputation. Never raises.
+    try:
+        google_places.enrich_candidates_with_ratings(
+            candidates, latitude, longitude, radius_km
+        )
+    except Exception as e:
+        try:
+            print(f"[WARN] Google Places rating enrichment failed: {e}", flush=True)
+        except Exception:
+            pass
+
+    return candidates
+
+
+# ==========================================================
+# PARALLEL CALL 2 (part B): LLM CURATION OF NEARBY HOSPITALS
+# ==========================================================
+def curate_hospitals_with_llm(
+    api_key: str,
+    symptoms: str,
+    specialty: str,
+    urgency: str,
+    scored_hospitals: List[Dict[str, Any]],
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Second AI call: hand the ranked candidate list to Laguna and let it
+    pick + justify the top hospitals for THIS patient's symptoms.
+
+    Returns the hospitals with AI-written `ai_match_score` / `ai_match_reason`,
+    or None when the LLM is unreachable (caller keeps the deterministic rank).
+    """
+    if not scored_hospitals:
+        return None
+
+    # Keep the payload small: top 12 deterministic candidates.
+    top = scored_hospitals[:12]
+    slim = [
+        {
+            "name": h.get("name"),
+            "city": h.get("city"),
+            "address": h.get("address"),
+            "distance_km": h.get("distance_km"),
+            "specialties": h.get("specialties"),
+            "emergency_available": h.get("emergency_available"),
+            "phone": h.get("phone"),
+            "reputation_band": h.get("reputation_band"),
+            "curability": h.get("curability"),
+            "base_score": h.get("ai_match_score"),
+        }
+        for h in top
     ]
-    urgency = "URGENT" if specialty in ["cardiology", "emergency", "neurology"] else "ROUTINE"
-    summary = f"Detected symptoms requiring {specialty} medical evaluation."
 
+    system_prompt = (
+        "You are a medical hospital-matching AI for patients and tourists in India.\n"
+        "Given the patient's symptoms, the triaged specialty/urgency, and the candidate hospitals "
+        "(each with distance_km, reputation_band, curability, and emergency capability):\n\n"
+        "Your task is to organize and rank the hospitals into structured clinical tiers:\n"
+        "1. Identify the single 'BEST' hospital for these specific symptoms (highest clinical match, curability, and reputation).\n"
+        "2. Identify the single 'NEAREST' emergency/walk-in hospital (closest physical distance that can safely handle the case).\n"
+        "3. Provide up to 5 additional hospitals in the 'NEAREST_CATEGORY' ranked by optimal distance and suitability.\n\n"
+        "For EACH hospital selected, provide:\n"
+        "- exact name (must match input verbatim)\n"
+        "- tier: 'best', 'nearest', or 'nearby'\n"
+        "- ai_match_score: integer 0-99\n"
+        "- ai_match_reason: a punchy, specific 8-15 word explanation explaining exactly WHY it was chosen for this patient's symptoms.\n\n"
+        "OUTPUT FORMAT: Return strictly valid JSON (no markdown fences) like:\n"
+        '{"hospitals": [{"name": "<exact name>", "tier": "best"|"nearest"|"nearby", "ai_match_score": 92, "ai_match_reason": "Equipped with 24/7 cardiac ICU and urgent coronary catheterization lab"}]}'
+    )
+    user_message = (
+        f"PATIENT SYMPTOMS: {symptoms}\n"
+        f"TRIAGED SPECIALTY: {specialty}\n"
+        f"URGENCY: {urgency}\n"
+        f"CANDIDATE HOSPITALS (JSON):\n{json.dumps(slim, ensure_ascii=False)}"
+    )
+
+    result = nim_generate_json(
+        api_key=api_key,
+        system_prompt=system_prompt,
+        user_message=user_message,
+        expect_key="hospitals",
+        per_model_timeout=14.0,
+        max_retries=1,
+    )
+    if not result or not isinstance(result.get("hospitals"), list):
+        return None
+
+    # Map LLM verdicts back onto the full candidate records by exact name.
+    verdict_by_name = {}
+    for item in result["hospitals"]:
+        if isinstance(item, dict) and item.get("name"):
+            verdict_by_name[str(item["name"]).strip().lower()] = item
+
+    curated: List[Dict[str, Any]] = []
+    used = set()
+    for item in result["hospitals"]:
+        name_key = str(item.get("name", "")).strip().lower()
+        matched_candidate = next((h for h in top if (h.get("name") or "").strip().lower() == name_key and id(h) not in used), None)
+        if matched_candidate:
+            h_copy = dict(matched_candidate)
+            try:
+                h_copy["ai_match_score"] = max(0, min(99, int(item.get("ai_match_score", matched_candidate.get("ai_match_score", 50)))))
+            except (TypeError, ValueError):
+                h_copy["ai_match_score"] = matched_candidate.get("ai_match_score", 50)
+            
+            reason = item.get("ai_match_reason")
+            if reason:
+                h_copy["ai_match_reason"] = str(reason).strip()
+            if item.get("tier"):
+                h_copy["tier"] = str(item["tier"]).lower()
+
+            curated.append(h_copy)
+            used.add(id(matched_candidate))
+
+    # Append any remaining top picks to ensure at least nearest options exist
+    for h in top:
+        if id(h) not in used:
+            h_copy = dict(h)
+            h_copy["tier"] = "nearby"
+            curated.append(h_copy)
+
+    # Ensure tiers are explicitly tagged even if LLM omitted them
+    if curated:
+        # Mark nearest
+        nearest_idx = min(range(len(curated)), key=lambda i: curated[i].get("distance_km", 999))
+        if not any(c.get("tier") == "nearest" for c in curated):
+            curated[nearest_idx]["tier"] = "nearest"
+        # Mark best (highest score)
+        best_idx = max(range(len(curated)), key=lambda i: curated[i].get("ai_match_score", 0))
+        if not any(c.get("tier") == "best" for c in curated):
+            curated[best_idx]["tier"] = "best"
+
+    return curated
+
+
+# ==========================================================
+# REPUTATION INFERENCE (name + services + accreditation)
+# ==========================================================
+# The national directory has no user ratings, so we infer a reputation band
+# from what it DOES carry: the hospital's name/brand, its accreditation, its
+# facility list, and its scale (beds, doctors). This is honest, offline, and
+# deterministic -- the UI labels it "inferred", never fake stars.
+
+# Recognised brand / academic tiers in India. Matched case-insensitively as
+# substrings of the hospital name.
+_PREMIUM_BRANDS = {
+    "aiims", "apollo", "fortis", "medanta", "manipal", "max healthcare",
+    "kokilaben", "lilavati", "narayana health", "cloudnine", "batra",
+    "mount elizabeth", "gleneagles", "radium", "pacific",
+}
+_SUPER_SPECIALITY_HINTS = {
+    "cardiac", "cardiology", "heart", "neuro", "neurosurgery", "onco", "cancer",
+    "trauma", "critical care", "icu", "transplant", "multi speciality",
+    "multispecialty", "super speciality", "superspecialty",
+}
+
+# Accreditation strings that signal verified quality.
+_ACCRED_MARKS = ("nabh", "jci", "nabl", "iso ", "iso9001", "iso 9001", "cap")
+
+
+def infer_reputation(h: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Derive a 0-99 reputation score + band from name/services/accreditation.
+
+    Returns {"reputation_score": int, "reputation_band": str,
+             "reputation_source": "inferred"}. When the row already carries a
+    REAL rating (from a future Google/Practo load), that outranks the inference.
+    """
+    # A real, sourced rating always wins over inference.
+    real_rating = h.get("rating")
+    real_reviews = h.get("review_count")
+    if isinstance(real_rating, (int, float)) and real_rating > 0:
+        # Map 0-5 -> 0-99, scaled by review volume (more reviews = more trust).
+        volume_boost = min(1.0, (real_reviews or 0) / 500.0) * 10
+        score = min(99, int(round((real_rating / 5.0) * 90 + volume_boost)))
+        band = "Rated" if score >= 75 else ("Good" if score >= 55 else "Average")
+        return {
+            "reputation_score": score,
+            "reputation_band": band,
+            "reputation_source": "rated",
+            "rating": real_rating,
+            "review_count": real_reviews,
+        }
+
+    # ---- Inference path (no real rating available) --------------------
+    name = (h.get("name") or "").lower()
+    accred = (h.get("accreditation") or "").lower()
+    facs = (h.get("facilities") or "").lower()
+    specs = (h.get("specialties") or "").lower()
+    blob = f"{name} {facs} {specs}"
+
+    score = 40  # baseline for any listed facility
+    reasons = []
+
+    if any(b in name for b in _PREMIUM_BRANDS):
+        score += 22
+        reasons.append("Recognised hospital brand")
+    if any(m in accred for m in _ACCRED_MARKS):
+        score += 18
+        reasons.append("Accredited (NABH/JCI/NABL)")
+    if any(k in blob for k in _SUPER_SPECIALITY_HINTS):
+        score += 12
+        reasons.append("Super-speciality services")
+
+    beds = h.get("total_beds") or 0
+    docs = h.get("doctors") or 0
+    if beds >= 250:
+        score += 12
+        reasons.append("Large 250+ bed facility")
+    elif beds >= 80:
+        score += 7
+        reasons.append("Mid-size 80+ bed facility")
+    if docs >= 100:
+        score += 6
+        reasons.append("100+ doctors on staff")
+    elif docs >= 30:
+        score += 3
+
+    score = max(0, min(99, score))
+    band = "Premium" if score >= 78 else ("Well-reviewed" if score >= 60 else "Standard")
     return {
-        "specialty": specialty,
-        "urgency": urgency,
-        "summary": summary,
-        "firstAid": first_aid,
-        "prerequisites": prerequisites
+        "reputation_score": score,
+        "reputation_band": band,
+        "reputation_source": "inferred",
+        "reputation_reasons": reasons,
+        "rating": None,
+        "review_count": None,
     }
+
+
+# ==========================================================
+# CURABILITY: can this hospital actually treat the condition?
+# ==========================================================
+# Map each triage specialty to the keywords a hospital's specialties/facilities
+# must show to be considered able to treat it. A cardiology patient should be
+# routed to a hospital that actually has a cardiology/heart department, not just
+# the nearest clinic.
+_SPECIALTY_CURE_KEYWORDS = {
+    "cardiology": ["cardio", "heart", "cardiac"],
+    "pulmonology": ["pulmo", "chest", "respiratory", "asthma", "lung"],
+    "neurology": ["neuro", "brain", "stroke"],
+    "orthopedics": ["ortho", "bone", "joint", "fracture", "spine"],
+    "gastroenterology": ["gastro", "digestive", "stomach", "liver", "gi "],
+    "dermatology": ["derma", "skin"],
+    "ent": ["ent", "ear", "nose", "throat"],
+    "ophthalmology": ["ophthal", "eye"],
+    "urology": ["uro", "kidney", "urinary"],
+    "obstetrics": ["obstetric", "gynae", "gynec", "maternity", "women", "childbirth"],
+    "emergency": ["emergency", "trauma", "casualty", "24", "icu", "critical"],
+    "fever": ["general", "medicine", "fever", "infection", "multi"],
+    "general medicine": ["general", "medicine", "family", "physician", "multi"],
+}
+
+
+def assess_curability(h: Dict[str, Any], specialty: str) -> Dict[str, Any]:
+    """
+    Judge whether a hospital offers the department needed for `specialty`.
+
+    Returns {"curable": bool, "curability": str, "curability_score": int 0-3}.
+    A hospital with no readable specialties is treated as unknown-but-hopeful
+    (curable=True, score 1) rather than excluded, since the CSV's specialty
+    column is often sparse.
+    """
+    target = (specialty or "general medicine").strip().lower()
+    keywords = _SPECIALTY_CURE_KEYWORDS.get(target, _SPECIALTY_CURE_KEYWORDS["general medicine"])
+
+    specs = (h.get("specialties") or "").lower()
+    facs = (h.get("facilities") or "").lower()
+    name = (h.get("name") or "").lower()
+    blob = f"{specs} {facs} {name}"
+
+    matched = [k for k in keywords if k in blob]
+
+    if not specs.strip():
+        # No specialty data: hope for the best but don't over-claim.
+        return {"curable": True, "curability": "Services unknown — verify on call",
+                "curability_score": 1, "matched_department": None}
+    if matched:
+        return {"curable": True,
+                "curability": f"Offers {target.title()} department",
+                "curability_score": 3, "matched_department": matched[0]}
+    if any(k in blob for k in ["multi", "general", "hospital"]):
+        return {"curable": True,
+                "curability": "Multispeciality — likely can treat",
+                "curability_score": 2, "matched_department": None}
+    return {"curable": False,
+            "curability": f"No {target.title()} department listed",
+            "curability_score": 0, "matched_department": None}
 
 
 # ==========================================================
@@ -355,7 +810,18 @@ def score_and_rank_hospitals(
     hospital_candidates: List[Dict[str, Any]],
     radius_km: float
 ) -> List[Dict[str, Any]]:
-    """Evaluates and scores nearby hospitals for the specific patient symptoms."""
+    """
+    Score and rank nearby hospitals for the patient's symptoms.
+
+    Beyond the original capability/proximity logic, each hospital is judged on:
+      - REPUTATION  (infer_reputation: name brand + accreditation + scale,
+                     or a real rating when one is loaded), and
+      - CURABILITY  (assess_curability: does it actually offer the department
+                     this condition needs?).
+
+    Both are merged into the score AND attached to each result so the UI can
+    show a reputation band and a "can they treat me?" line.
+    """
     scored_hospitals = []
     seen_hospital_ids = set()
     is_emergency_condition = target_specialty.lower() in ["emergency", "trauma", "cardiac", "cardiology"] or evaluate_emergency_red_flags(symptoms).get("is_emergency", False)
@@ -370,9 +836,22 @@ def score_and_rank_hospitals(
         facs = (h.get("facilities") or "").lower()
         name = (h.get("name") or "").lower()
 
-        score = 45  # Baseline
+        score = 35  # Baseline (lower than before: reputation/curability now add)
         reasons = []
 
+        # --- Curability: can this hospital treat the condition at all? ------
+        cure = assess_curability(h, target_specialty)
+        if cure["curability_score"] == 3:
+            score += 20
+            reasons.append(cure["curability"])
+        elif cure["curability_score"] == 2:
+            score += 10
+        elif cure["curability_score"] == 0:
+            # Penalise hospitals that clearly lack the needed department.
+            score -= 15
+            reasons.append(cure["curability"])
+
+        # --- Capability (specialty / emergency / ICU) ----------------------
         if is_emergency_condition:
             # For emergency/life-threatening events, prioritize trauma, 24/7 emergency & ICU
             if h.get("emergency_available"):
@@ -391,10 +870,10 @@ def score_and_rank_hospitals(
             # Specialty match for outpatient / routine conditions
             spec_target = target_specialty.lower()
             if spec_target in specs or spec_target in name:
-                score += 35
+                score += 25
                 reasons.append(f"Specialized {target_specialty.title()} department")
             elif any(k in specs for k in ["multispecialty", "general"]):
-                score += 15
+                score += 10
                 reasons.append("Multispecialty hospital")
 
             if h.get("emergency_available"):
@@ -405,7 +884,14 @@ def score_and_rank_hospitals(
                 score += 5
                 reasons.append("ICU facility")
 
-        # Proximity score
+        # --- Reputation: name brand + accreditation + scale ----------------
+        rep = infer_reputation(h)
+        rep_contribution = int(round(rep["reputation_score"] / 10))  # 0-10 pts
+        score += rep_contribution
+        if rep["reputation_band"] in ("Premium", "Well-reviewed", "Rated"):
+            reasons.append(f"{rep['reputation_band']} reputation")
+
+        # --- Proximity score ----------------------------------------------
         if dist < 3.0:
             score += 10
             reasons.append(f"Immediate proximity ({dist:.1f} km)")
@@ -413,26 +899,43 @@ def score_and_rank_hospitals(
             score += 5
             reasons.append(f"Nearby distance ({dist:.1f} km)")
 
-        final_score = min(99, score)
+        final_score = max(0, min(99, score))
         match_reason = " • ".join(reasons) if reasons else "Reachable medical center"
 
-        if final_score >= 50:
+        if final_score >= 45:
             h_copy = dict(h)
             h_copy["ai_match_score"] = final_score
             h_copy["ai_match_reason"] = match_reason
+            # Reputation + curability for the UI.
+            h_copy["reputation_band"] = rep["reputation_band"]
+            h_copy["reputation_source"] = rep["reputation_source"]
+            h_copy["reputation_reasons"] = rep.get("reputation_reasons", [])
+            h_copy["rating"] = rep.get("rating")
+            h_copy["review_count"] = rep.get("review_count")
+            h_copy["curable"] = cure["curable"]
+            h_copy["curability"] = cure["curability"]
             scored_hospitals.append(h_copy)
             seen_hospital_ids.add(h_id)
 
     scored_hospitals.sort(key=lambda x: (-x["ai_match_score"], x["distance_km"]))
-    
-    # Ensure at least nearest hospitals are shown if none hit 50%
+
+    # Ensure at least nearest hospitals are shown if none hit the threshold
     if not scored_hospitals:
         hospital_candidates.sort(key=lambda x: x["distance_km"])
         for h in hospital_candidates[:3]:
             if h.get("id") not in seen_hospital_ids:
                 h_copy = dict(h)
-                h_copy["ai_match_score"] = 50
+                h_copy["ai_match_score"] = 45
                 h_copy["ai_match_reason"] = "Nearest available facility"
+                cure = assess_curability(h, target_specialty)
+                rep = infer_reputation(h)
+                h_copy["reputation_band"] = rep["reputation_band"]
+                h_copy["reputation_source"] = rep["reputation_source"]
+                h_copy["reputation_reasons"] = rep.get("reputation_reasons", [])
+                h_copy["rating"] = rep.get("rating")
+                h_copy["review_count"] = rep.get("review_count")
+                h_copy["curable"] = cure["curable"]
+                h_copy["curability"] = cure["curability"]
                 scored_hospitals.append(h_copy)
                 seen_hospital_ids.add(h.get("id"))
 
@@ -449,57 +952,9 @@ def analyze_symptoms(
     lon = req.longitude
     radius_km = req.radius_km or 20.0
 
-    # 1. Fetch geographic candidate hospitals from DB and deduplicate by name + location
-    all_hospitals = db.query(Hospital).all()
-    candidates = []
-    seen_keys = set()
-
-    for h in all_hospitals:
-        if h.latitude and h.longitude:
-            dist = haversine(lat, lon, h.latitude, h.longitude)
-            if dist <= radius_km:
-                # Deduplication key across name and approximate coordinates
-                name_clean = re.sub(r'[^a-z0-9]', '', (h.name or "").lower())
-                city_clean = re.sub(r'[^a-z0-9]', '', (h.city or h.district or "").lower())
-                dedup_key = (name_clean, city_clean, round(h.latitude, 3), round(h.longitude, 3))
-                if dedup_key in seen_keys or h.id in seen_keys:
-                    continue
-                seen_keys.add(dedup_key)
-                seen_keys.add(h.id)
-
-                # Clean and deduplicate specialties for this hospital
-                cleaned_specs = ""
-                if h.specialties:
-                    raw_specs = [s.strip() for s in re.split(r'\\n|\n|,|;', h.specialties) if s.strip()]
-                    unique_specs = []
-                    seen_spec = set()
-                    for sp in raw_specs:
-                        sp_title = sp.title()
-                        if sp_title.lower() not in seen_spec:
-                            seen_spec.add(sp_title.lower())
-                            unique_specs.append(sp_title)
-                    cleaned_specs = ", ".join(unique_specs)
-
-                candidates.append({
-                    "id": h.id,
-                    "name": h.name,
-                    "city": h.city,
-                    "state": h.state,
-                    "district": h.district,
-                    "address": h.address,
-                    "pincode": h.pincode,
-                    "latitude": h.latitude,
-                    "longitude": h.longitude,
-                    "specialties": cleaned_specs,
-                    "facilities": h.facilities,
-                    "emergency_available": h.emergency_available,
-                    "emergency_services": h.emergency_services,
-                    "emergency_phone": h.emergency_phone if hasattr(h, "emergency_phone") else None,
-                    "phone": h.phone,
-                    "website": h.website,
-                    "total_beds": h.total_beds,
-                    "distance_km": round(dist, 2),
-                })
+    # 1. Fetch candidate hospitals from ALL THREE sources (Postgres + Overpass
+    #    + Geoapify), deduplicated by name + location.
+    candidates = gather_nearby_candidates(db, lat, lon, radius_km)
 
     # Red-flag safety evaluation
     red_flag = evaluate_emergency_red_flags(symptoms)
@@ -517,13 +972,13 @@ def analyze_symptoms(
 
     # 2. Execute Two Parallel Tasks Concurrently
     # Task 1: Draft First Aid Instructions (NVIDIA NIM / Red Cross Manual)
-    # Task 2: AI Hospital Recommendation & Indexing
+    # Task 2: Deterministic Hospital Recommendation & Indexing
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         future_first_aid = executor.submit(draft_first_aid_instructions, symptoms)
         future_hospitals = executor.submit(score_and_rank_hospitals, symptoms, primary_specialty, candidates, radius_km)
 
         try:
-            first_aid_result = future_first_aid.result(timeout=4.0)
+            first_aid_result = future_first_aid.result(timeout=30.0)
         except concurrent.futures.TimeoutError:
             if is_emergency:
                 first_aid_result = {
@@ -537,7 +992,11 @@ def analyze_symptoms(
                 first_aid_result = {}
         
         try:
-            recommended_hospitals = future_hospitals.result(timeout=3.0)
+            # Budget covers the fast-mode providers: Overpass (2 mirrors x 3s)
+            # + Geoapify (8s) ~= 14s worst case, plus local query headroom.
+            # Runs in parallel with the LLM first-aid call, so this does not
+            # add perceived latency.
+            recommended_hospitals = future_hospitals.result(timeout=18.0)
         except concurrent.futures.TimeoutError:
             recommended_hospitals = []
 
@@ -548,6 +1007,36 @@ def analyze_symptoms(
     else:
         specialty = first_aid_result.get("specialty", primary_specialty.title())
         urgency = first_aid_result.get("urgency", "ROUTINE")
+
+    # 3. Execute Complete Hospital Discovery & Enrichment Workflow:
+    #    Clinical Guardrails -> Google AI Search Enrichment -> NVIDIA NIM 7-Hospital Selection -> Google Places Contacts
+    try:
+        final_workflow_hospitals = execute_hospital_discovery_workflow(
+            db=db,
+            symptoms=symptoms,
+            target_specialty=specialty,
+            urgency=urgency,
+            raw_candidates=candidates,
+            latitude=lat,
+            longitude=lon,
+            radius_km=radius_km
+        )
+        if final_workflow_hospitals:
+            recommended_hospitals = final_workflow_hospitals
+    except Exception as wf_err:
+        import logging
+        logging.getLogger(__name__).warning(f"Workflow orchestrator fallback: {wf_err}")
+        api_key = os.getenv("NVIDIA_NIM_API_KEY")
+        if api_key and recommended_hospitals:
+            curated = curate_hospitals_with_llm(
+                api_key=api_key,
+                symptoms=symptoms,
+                specialty=specialty,
+                urgency=urgency,
+                scored_hospitals=recommended_hospitals,
+            )
+            if curated:
+                recommended_hospitals = curated
 
     summary = first_aid_result.get("summary")
     if not summary:

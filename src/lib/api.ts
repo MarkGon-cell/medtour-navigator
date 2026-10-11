@@ -1,19 +1,11 @@
 import axios from "axios";
 
-// Dynamically use current hostname so phones on LAN (e.g. 192.168.x.x) connect to the PC backend on port 8000
+// Use relative URL so Vite proxy forwards requests to FastAPI (127.0.0.1:8000).
+// This guarantees that mobile devices connecting to http://192.168.x.x:8080 work seamlessly
+// without needing port 8000 exposed on the LAN or blocked by Windows Firewall.
 const getBaseUrl = () => {
-  if (typeof window !== "undefined" && window.location) {
-    const hostname = window.location.hostname;
-    if (hostname && hostname !== "localhost" && hostname !== "127.0.0.1") {
-      // Served over HTTPS (e.g. an ngrok tunnel): call the backend on the
-      // same origin — the Vite dev proxy forwards /auth, /hospitals/*, etc.
-      // to FastAPI. Avoids mixed-content blocking on the phone.
-      if (window.location.protocol === "https:") {
-        return "";
-      }
-      // Plain HTTP over LAN: talk directly to the PC backend on port 8000.
-      return `http://${hostname}:8000`;
-    }
+  if (typeof window !== "undefined") {
+    return "";
   }
   return import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 };

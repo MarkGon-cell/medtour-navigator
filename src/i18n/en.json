@@ -1,0 +1,157 @@
+{
+  "common": {
+    "appName": "MedTour",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "edit": "Edit",
+    "delete": "Delete",
+    "create": "Create",
+    "upload": "Upload",
+    "download": "Download",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "done": "Done",
+    "ok": "OK",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "nav": {
+    "home": "Home",
+    "features": "Features",
+    "how": "How It Works",
+    "faq": "FAQ",
+    "contact": "Contact",
+    "login": "Sign In",
+    "register": "Get Started",
+    "admin": "Admin Moderation",
+    "dashboard": "Dashboard"
+  },
+  "home": {
+    "hero": {
+      "title": "Healthcare that travels with you across India",
+      "subtitle": "Find verified hospitals, get AI-powered recommendations, and reach emergency care in minutes — designed for domestic and international tourists."
+    },
+    "sos": {
+      "buttonText": "SOS — Emergency Help",
+      "requesting": "Dispatching...",
+      "success": "SOS SENT — Help is on the way!",
+      "error": "SOS trigger failed. Please call 108 directly!"
+    },
+    "features": {
+      "verifiedHospitals": {
+        "title": "Verified Hospitals",
+        "desc": "Handpicked, credential-checked facilities across every major city in India."
+      },
+      "aiRecommendations": {
+        "title": "AI Recommendations",
+        "desc": "Get matched to the right specialists based on symptoms, budget and location."
+      },
+      "emergencySOS": {
+        "title": "Emergency SOS",
+        "desc": "One-tap SOS with real-time routing to the nearest emergency-ready hospital."
+      },
+      "offlineMaps": {
+        "title": "Offline Maps",
+        "desc": "Navigate care even with patchy signal using cached OpenStreetMap tiles."
+      },
+      "multilingual": {
+        "title": "Multilingual",
+        "desc": "English, Hindi and 8+ Indian languages, plus tourist-friendly translations."
+      },
+      "careConcierge": {
+        "title": "Care Concierge",
+        "desc": "Appointment booking, second opinions and travel-adjusted follow-ups."
+      }
+    },
+    "howItWorks": {
+      "step1": {
+        "title": "Describe your need",
+        "desc": "Share symptoms and your location."
+      },
+      "step2": {
+        "title": "Get matched",
+        "desc": "We find the nearest verified hospitals ranked by your needs and real-time wait times."
+      },
+      "step3": {
+        "title": "Navigate or book",
+        "desc": "Walk or drive to care, or book an appointment directly."
+      }
+    },
+    "faq": {
+      "item1": {
+        "q": "Is MedTour free to use?",
+        "a": "Yes. Search, AI recommendations and SOS routing are free. Only premium concierge is paid."
+      },
+      "item2": {
+        "q": "Are hospitals verified?",
+        "a": "Every listed hospital is credential-checked and reviewed by our medical partners."
+      },
+      "item3": {
+        "q": "Does it work offline?",
+        "a": "Maps and nearest-hospital data are cached so core navigation works without signal."
+      },
+      "item4": {
+        "q": "Which languages are supported?",
+        "a": "English, Hindi, Tamil, Telugu, Bengali, Marathi and more, with tourist translations."
+      }
+    },
+    "appointments": {
+      "upcoming": "Upcoming",
+      "completed": "Completed",
+      "cancelled": "Cancelled",
+      "all": "All",
+      "bookAppointment": "Book Appointment",
+      "bookAgain": "Book Again",
+      "checkIn": "Check In",
+      "markCompleted": "Mark Completed",
+      "cancelAppointment": "Cancel Appointment",
+      "confirmCancel": "Cancel Appointment",
+      "appointmentCancelled": "Appointment cancelled successfully",
+      "error": "Failed to update appointment",
+      "loading": "Loading appointments...",
+      "noAppointments": "No upcoming appointments"
+    },
+    "admin": {
+      "title": "Admin Moderation",
+      "description": "Scaffolding console to inspect incoming SOS alerts and moderate appointments.",
+      "authRequired": "Admin access required",
+      "authHint": "Default password: admin123",
+      "login": "Sign In",
+      "logout": "Logout",
+      "sosAlerts": "SOS Alerts",
+      "appointments": "Appointments",
+      "status": "Status",
+      "user": "User",
+      "location": "Location",
+      "time": "Time",
+      "action": "Actions",
+      "pending": "Pending",
+      "dispatched": "Dispatched",
+      "resolved": "Resolved",
+      "cancelled": "Cancelled"
+    },
+    "sosAlert": {
+      "triggered": "SOS Alert Received",
+      "address": "Address",
+      "latitude": "Latitude",
+      "longitude": "Longitude",
+      "contactServices": "Contact Emergency Services",
+      "logPath": "Log File",
+      "viewLog": "View Log",
+      "actions": "Actions"
+    },
+    "errors": {
+      "generic": "Something went wrong. Please try again.",
+      "networkError": "Network error. Please check your connection.",
+      "locationDenied": "Location access denied. Please enable location services to use SOS.",
+      "authFailed": "Authentication failed. Please check your credentials.",
+      "notFound": "Requested resource not found.",
+      "unauthorized": "You are not authorized to perform this action."
+    }
+  }
+}
