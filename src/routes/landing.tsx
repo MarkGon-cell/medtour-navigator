@@ -16,7 +16,8 @@ import {
   PhoneCall,
   Sparkles,
   HelpCircle,
-  Plus
+  Plus,
+  Stethoscope
 } from "lucide-react";
 import { Footer } from "@/components/site/Footer";
 
@@ -37,7 +38,7 @@ const contentData = {
   plain: {
     hero: {
       eyebrow: "MedTour",
-      title: "SURVIVE THE UNEXPECTED.",
+      title: "SURVIVE THE UNEXPECTED",
       subtitle: (
         <>
           Your emergency healthcare helper for foreign tourists in India. Tap once to <span className="underline decoration-black/30 underline-offset-4 font-normal">call 112</span>, route to the <strong className="font-semibold text-black">nearest ER</strong>, and get a <em className="italic">translated taxi driver card</em>.
@@ -534,11 +535,11 @@ function LandingPage() {
           </p>
 
           {/* PRIMARY & SECONDARY HERO CTAS */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 max-w-xl mx-auto w-full">
+          <div className="max-w-2xl mx-auto w-full space-y-3.5">
             <button
               type="button"
               onClick={() => navigate({ to: "/" })}
-              className={`h-13 sm:h-14 px-7 rounded-full font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2.5 cursor-pointer shadow-lg active:scale-95 whitespace-nowrap ${
+              className={`w-full h-13 sm:h-14 px-7 rounded-full font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2.5 cursor-pointer shadow-lg active:scale-95 whitespace-nowrap ${
                 isTech
                   ? "bg-white text-black hover:bg-neutral-200 shadow-[0_4px_24px_rgba(255,255,255,0.15)]"
                   : "bg-black text-white hover:bg-neutral-800 shadow-[0_4px_20px_rgba(0,0,0,0.12)]"
@@ -549,18 +550,33 @@ function LandingPage() {
               <ArrowRight className="w-4 h-4 shrink-0 opacity-70" />
             </button>
 
-            <button
-              type="button"
-              onClick={() => navigate({ to: "/walk-in" })}
-              className={`h-13 sm:h-14 px-7 rounded-full font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2.5 cursor-pointer border active:scale-95 whitespace-nowrap ${
-                isTech
-                  ? "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-900 hover:border-neutral-700"
-                  : "border-gray-300/80 bg-white text-black hover:bg-gray-50 hover:border-black/30"
-              }`}
-            >
-              <HeartPulse className="w-4 h-4 shrink-0 opacity-70" />
-              <span>{isTech ? "Walk-In Specs" : "Find Clinics"}</span>
-            </button>
+            <div className="flex items-center justify-center gap-3.5">
+              <button
+                type="button"
+                onClick={() => navigate({ to: "/walk-in" })}
+                className={`flex-1 h-13 sm:h-14 px-5 rounded-full font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2.5 cursor-pointer border active:scale-95 whitespace-nowrap ${
+                  isTech
+                    ? "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-900 hover:border-neutral-700"
+                    : "border-gray-300/80 bg-white text-black hover:bg-gray-50 hover:border-black/30"
+                }`}
+              >
+                <HeartPulse className="w-4 h-4 shrink-0 opacity-70" />
+                <span>{isTech ? "Walk-In Specs" : "Find Clinics"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate({ to: "/doctor" })}
+                className={`flex-1 h-13 sm:h-14 px-5 rounded-full font-semibold text-sm transition-all duration-300 flex items-center justify-center gap-2.5 cursor-pointer border active:scale-95 whitespace-nowrap ${
+                  isTech
+                    ? "border-white/15 bg-white/5 text-neutral-200 hover:bg-white/10 hover:border-white/30"
+                    : "border-black/20 bg-black/5 text-black hover:bg-black/10 hover:border-black/40"
+                }`}
+              >
+                <Stethoscope className="w-4 h-4 shrink-0 opacity-80" />
+                <span>{isTech ? "Doctor Portal" : "Doctor Login"}</span>
+              </button>
+            </div>
           </div>
         </div>
       </section>

@@ -4,8 +4,19 @@ import { MobileNav } from "@/components/site/MobileNav";
 import { QuickMedicalIdModal, getStoredMedicalId } from "@/components/site/QuickMedicalIdModal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { FiClock, FiCheck, FiX, FiDownload, FiShield } from "react-icons/fi";
+import { FiClock, FiCheck, FiX, FiDownload, FiShield, FiCamera, FiEye, FiFileText, FiDollarSign, FiTrash2 } from "react-icons/fi";
 import { toast } from "sonner";
+import { QrScannerModal } from "@/components/visits/QrScannerModal";
+import { ClaimPurchaseModal } from "@/components/visits/ClaimPurchaseModal";
+import { getPatientName } from "@/lib/mtrSession";
+import { promptMtrBackup } from "@/components/site/MtrBackupPrompt";
+import { QRCodeSVG } from "qrcode.react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/visits")({
   validateSearch: (search: Record<string, unknown>): { tab?: string } => {
@@ -34,6 +45,37 @@ export interface VisitRecord {
   insuranceTaxId: string;
   estimatedWaitMins?: number;
   cancellationReason?: string;
+  // Doctor diagnosis & prescription (via QR scan)
+  appointmentCode?: string;
+  diagnosis?: string;
+  prescription?: string;
+  diagnosisNotes?: string;
+  completedAt?: string;
+  department?: string;
+  /** Patient name as sent at booking (no patient accounts — inline identity). */
+  patientName?: string;
+  /** Doctor who operated on this visit (stamped on diagnosis submit). */
+  assignedDoctor?: string;
+  // Verified claim
+  claimPurchased?: boolean;
+  claimPurchasedAt?: string;
+  verificationHash?: string;
+  verificationUrl?: string;
+  invoice?: {
+    invoice_number?: string;
+    issued_on?: string;
+    line_items?: Array<{
+      description: string;
+      quantity: number;
+      unit_price: number;
+    }>;
+    subtotal?: number;
+    tax_amount?: number;
+    total_amount?: number;
+    currency?: string;
+    notes?: string;
+  };
+  qrPayload?: string;
 }
 
 // Visits ledger is strictly driven by the docked .mtr file or live sessions.
@@ -69,6 +111,15 @@ function VisitsPage() {
   const [isDocked, setIsDocked] = useState<boolean>(false);
   const [selectedCompletedVisit, setSelectedCompletedVisit] = useState<VisitRecord | null>(null);
   const [isMedicalIdOpen, setIsMedicalIdOpen] = useState(false);
+
+  // QR scanner & claim purchase modals
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [claimVisit, setClaimVisit] = useState<VisitRecord | null>(null);
+  const [isClaimOpen, setIsClaimOpen] = useState(false);
+
+  // View Session Modal state
+  const [sessionModalVisit, setSessionModalVisit] = useState<VisitRecord | null>(null);
+  const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
 
   // Persist current tab choice into sessionStorage
   useEffect(() => {
@@ -154,18 +205,99 @@ function VisitsPage() {
     }
   };
 
-  const handleMarkCompleted = (id: string) => {
-    const updated = visits.map((v) => (v.id === id ? { ...v, status: "completed" as const } : v));
-    saveVisitsToStorage(updated);
-    toast.success("Visit marked as completed! Insurance receipt unlocked.");
-  };
-
   const handleCancelVisit = (id: string) => {
     const updated = visits.map((v) =>
       v.id === id ? { ...v, status: "cancelled" as const, cancellationReason: "Cancelled by user" } : v
     );
     saveVisitsToStorage(updated);
     toast.info("Visit cancelled.");
+  };
+
+  const handleDeleteVisit = (id: string) => {
+    const updated = visits.filter((v) => v.id !== id);
+    saveVisitsToStorage(updated);
+    if (selectedCompletedVisit?.id === id) {
+      setSelectedCompletedVisit(null);
+    }
+    toast.success("Visit record removed from local .mtr ledger.");
+  };
+
+  /**
+   * Called after the patient scans the doctor's QR code.
+   * The backend validates the appointment code and returns the full
+   * appointment. We convert it into a local VisitRecord and mark it
+   * completed so it appears in the Completed tab.
+   */
+  const handleQrScanSuccess = (appointment: any, clinical?: any) => {
+    if (!appointment) return;
+
+    const existingIdx = visits.findIndex(
+      (v) => v.appointmentCode === appointment.appointment_code || v.id === `appt-${appointment.id}`,
+    );
+
+    const diagnosis = clinical?.diagnosis || appointment.diagnosis;
+    const prescription = clinical?.prescription || appointment.prescription;
+    const diagnosisNotes = clinical?.notes || appointment.diagnosis_notes;
+    const invoice = clinical?.invoice || appointment.invoice;
+
+    let costDisplay = "—";
+    if (invoice?.total_amount != null) {
+      costDisplay = `${invoice.currency || "USD"} ${invoice.total_amount}`;
+    }
+
+    const visitRecord: VisitRecord = {
+      id: existingIdx >= 0 ? visits[existingIdx].id : `appt-${appointment.id}`,
+      facilityName: appointment.hospital?.name || appointment.hospital_name || "Hospital",
+      address: appointment.hospital?.address || "",
+      phone: appointment.hospital?.phone || "",
+      status: "completed",
+      timestamp: appointment.completed_at
+        ? new Date(appointment.completed_at).getTime()
+        : Date.now(),
+      symptoms: appointment.symptoms
+        ? [appointment.symptoms]
+        : appointment.reason
+          ? [appointment.reason]
+          : [],
+      cost: costDisplay,
+      insuranceTaxId: "MEDTOUR-VERIFIED",
+      appointmentCode: appointment.appointment_code,
+      diagnosis,
+      prescription,
+      diagnosisNotes,
+      completedAt: appointment.completed_at || new Date().toISOString(),
+      department: appointment.department,
+      claimPurchased: appointment.claim_purchased || false,
+      claimPurchasedAt: appointment.claim_purchased_at,
+      patientName: appointment.patient_name || getPatientName() || undefined,
+      assignedDoctor: appointment.assigned_doctor || appointment.doctor_name || undefined,
+      invoice: invoice || undefined,
+      qrPayload: clinical?.rawPayload,
+    };
+
+    if (existingIdx >= 0) {
+      const updated = [...visits];
+      updated[existingIdx] = visitRecord;
+      saveVisitsToStorage(updated);
+    } else {
+      saveVisitsToStorage([...visits, visitRecord]);
+    }
+
+    // Ensure the ledger is considered docked even if no .mtr was present
+    if (!isDocked) {
+      setIsDocked(true);
+      localStorage.setItem("medtour_mtr_docked", "true");
+    }
+
+    // Prompt user to backup their updated .mtr records
+    promptMtrBackup("Visit completed — please download your latest .mtr backup before proceeding.");
+
+    // Highlight and view session
+    setSelectedCompletedVisit(visitRecord);
+
+    // Switch to the Completed tab so the patient sees the diagnosis
+    navigate({ to: "/visits", search: { tab: "completed" } as any });
+    toast.success("Visit verified and completed! Details added to your records.");
   };
 
   const handleAddToNativeCalendar = async (visit: VisitRecord) => {
@@ -308,9 +440,6 @@ function VisitsPage() {
           className="group inline-flex items-center gap-2 px-4 py-1.5 rounded-full hover:bg-muted/60 transition-all cursor-pointer focus:outline-none"
           aria-label="MedTour Landing Page"
         >
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-primary text-primary-foreground shadow-xs group-hover:scale-105 transition-transform">
-            <FiShield className="h-4 w-4" />
-          </span>
           <span className="text-xl font-black tracking-tight text-foreground group-hover:opacity-85 transition-opacity">
             MedTour
           </span>
@@ -330,7 +459,7 @@ function VisitsPage() {
 
         {/* Separated Floating Morphing Pill Tab Switcher directly above bottom navbar */}
         <div className="fixed bottom-[5.75rem] left-0 right-0 z-40 flex justify-center px-3 sm:px-4 pointer-events-none pb-[env(safe-area-inset-bottom)] animate-in fade-in slide-in-from-bottom-3 duration-300">
-          <div className="w-full max-w-[300px] h-16 flex items-center justify-between px-2 rounded-full bg-background/90 backdrop-blur-2xl border border-border/80 shadow-[0_12px_36px_rgba(0,0,0,0.18)] pointer-events-auto shrink-0">
+          <div className="w-fit max-w-[95vw] h-16 flex items-center justify-center gap-1.5 px-2 rounded-full bg-background/90 backdrop-blur-2xl border border-border/80 shadow-[0_12px_36px_rgba(0,0,0,0.18)] pointer-events-auto shrink-0">
             {TABS.map((tab) => {
               const isActive = activeTab === tab.id;
               const Icon = tab.icon;
@@ -338,15 +467,15 @@ function VisitsPage() {
                 <button
                   key={tab.id}
                   onClick={() => navigate({ to: "/visits", search: { tab: tab.id } as any })}
-                  className={`relative flex items-center justify-center gap-2 h-12 px-3 sm:px-4 rounded-full font-extrabold text-sm transition-all duration-300 ${
+                  className={`relative flex items-center justify-center gap-2 h-12 rounded-full font-extrabold text-sm transition-all duration-300 ${
                     isActive
-                      ? "bg-background text-foreground shadow-md pr-5"
-                      : "text-muted-foreground/70 hover:text-foreground"
+                      ? "bg-background text-foreground shadow-md px-3 sm:px-4"
+                      : "text-muted-foreground/70 hover:text-foreground px-2.5 sm:px-3"
                   }`}
                 >
                   {/* Circular Icon Badge */}
                   <div
-                    className={`flex items-center justify-center h-10 w-10 rounded-full border-2 transition-all duration-300 ${
+                    className={`flex items-center justify-center h-10 w-10 shrink-0 rounded-full border-2 transition-all duration-300 ${
                       isActive
                         ? "bg-black text-white dark:bg-white dark:text-black border-black dark:border-white"
                         : "border-black/80 dark:border-white/80 bg-transparent text-foreground"
@@ -357,7 +486,7 @@ function VisitsPage() {
 
                   {/* Expanded Label on Active */}
                   {isActive && (
-                    <span className="animate-in fade-in slide-in-from-left-2 duration-200 whitespace-nowrap text-sm font-extrabold">
+                    <span className="animate-in fade-in slide-in-from-left-2 duration-200 whitespace-nowrap text-sm font-extrabold pr-1">
                       {tab.label}
                     </span>
                   )}
@@ -440,10 +569,11 @@ function VisitsPage() {
                           📅 Add to Phone Calendar
                         </Button>
                         <Button
-                          onClick={() => handleMarkCompleted(visit.id)}
-                          className="flex-1 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs"
+                          onClick={() => setIsScannerOpen(true)}
+                          className="flex-1 h-10 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs shadow-xs flex items-center justify-center gap-1.5"
                         >
-                          ✓ Mark Visit Completed
+                          <FiCamera className="h-4 w-4 shrink-0" />
+                          Scan Doctor QR Code
                         </Button>
                         <Button
                           onClick={() => handleCancelVisit(visit.id)}
@@ -469,36 +599,116 @@ function VisitsPage() {
                 ) : (
                   completedVisits.map((visit) => {
                     const isSelected = selectedCompletedVisit?.id === visit.id;
+                    const hasDiagnosis = !!(visit.diagnosis && visit.appointmentCode);
                     return (
                       <Card
                         key={visit.id}
                         onClick={() => setSelectedCompletedVisit(visit)}
-                        className={`rounded-2xl border-2 transition-all cursor-pointer p-5 space-y-3 ${
-                          isSelected ? "border-emerald-500 bg-emerald-500/5 shadow-md" : "border-border/70 bg-card hover:border-border"
+                        className={`rounded-2xl border-2 transition-all cursor-pointer p-4 space-y-3 ${
+                          isSelected
+                            ? "border-emerald-500 bg-emerald-500/5 shadow-md"
+                            : "border-border/70 bg-card hover:border-border hover:shadow-xs"
                         }`}
                       >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-xs font-bold inline-block mb-1.5">
-                              ✓ Completed Visit
-                            </span>
-                            <h3 className="text-base font-bold text-foreground">{visit.facilityName}</h3>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {new Date(visit.timestamp).toLocaleDateString()} • {visit.cost}
+                        {/* Header & Badges */}
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="space-y-1 min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[11px] font-bold inline-block">
+                                ✓ Completed
+                              </span>
+                              {visit.claimPurchased ? (
+                                <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 border border-blue-500/30 text-[10px] font-extrabold inline-flex items-center gap-1">
+                                  <FiShield className="h-3 w-3" /> Verified
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/30 text-[10px] font-bold">
+                                  Claim Ready
+                                </span>
+                              )}
+                              {visit.appointmentCode && (
+                                <span className="text-[10px] font-mono font-bold text-foreground bg-muted px-2 py-0.5 rounded-md border border-border/80">
+                                  {visit.appointmentCode}
+                                </span>
+                              )}
+                            </div>
+                            <h3 className="text-base font-extrabold text-foreground truncate">
+                              {visit.facilityName}
+                            </h3>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {visit.department || "General Medicine"}
+                              {visit.assignedDoctor ? ` • Dr. ${visit.assignedDoctor}` : ""}
+                              {" • "}
+                              {new Date(visit.timestamp).toLocaleDateString()}
                             </p>
                           </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm(`Delete visit at ${visit.facilityName} from your .mtr vault?`)) {
+                                handleDeleteVisit(visit.id);
+                              }
+                            }}
+                            className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0 cursor-pointer"
+                            title="Delete this visit from your .mtr records"
+                          >
+                            <FiTrash2 className="h-4 w-4" />
+                          </button>
                         </div>
 
-                        <Button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDownloadReceipt(visit);
-                          }}
-                          className="w-full h-11 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-xs"
-                        >
-                          <FiDownload className="h-4 w-4 shrink-0" />
-                          <span className="truncate">Download Insurance Receipt (PDF)</span>
-                        </Button>
+                        {/* Minimal Sub-Summary: Patient + Cost */}
+                        <div className="flex items-center justify-between text-xs px-3 py-2 rounded-xl bg-muted/30 border border-border/50">
+                          <span className="text-muted-foreground truncate">
+                            <strong>Patient:</strong> {visit.patientName || getPatientName() || "Guest"}
+                          </span>
+                          {visit.invoice?.total_amount != null && (
+                            <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 shrink-0 ml-2">
+                              {visit.invoice.currency || "USD"} {Number(visit.invoice.total_amount).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <Button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSessionModalVisit(visit);
+                              setIsSessionModalOpen(true);
+                            }}
+                            variant="outline"
+                            className="flex-1 h-9 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-muted/60"
+                          >
+                            <FiEye className="h-3.5 w-3.5" /> View Session
+                          </Button>
+
+                          <Button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setClaimVisit(visit);
+                              setIsClaimOpen(true);
+                            }}
+                            className={`flex-1 h-9 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs ${
+                              visit.claimPurchased
+                                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                : "bg-black text-white dark:bg-white dark:text-black hover:opacity-90"
+                            }`}
+                          >
+                            {visit.claimPurchased ? (
+                              <>
+                                <FiDownload className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">Download PDF</span>
+                              </>
+                            ) : (
+                              <>
+                                <FiShield className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">Mediclaim ($15)</span>
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </Card>
                     );
                   })
@@ -554,7 +764,9 @@ function VisitsPage() {
                 {selectedCompletedVisit ? (
                   <div className="p-5 rounded-2xl bg-muted/20 border border-border space-y-4 text-xs font-sans">
                     <div className="border-b border-border/60 pb-3">
-                      <span className="text-[10px] font-bold uppercase text-primary tracking-wider block">Official Receipt</span>
+                      <span className="text-[10px] font-bold uppercase text-primary tracking-wider block">
+                        {selectedCompletedVisit.appointmentCode ? "Verified Mediclaim" : "Official Receipt"}
+                      </span>
                       <h4 className="text-lg font-black text-foreground">{selectedCompletedVisit.facilityName}</h4>
                       <p className="text-muted-foreground">{selectedCompletedVisit.insuranceTaxId}</p>
                     </div>
@@ -570,17 +782,98 @@ function VisitsPage() {
                       </div>
                     </div>
 
-                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-                      <span className="font-bold text-emerald-700 block">Total Claim Amount Paid</span>
-                      <span className="text-xl font-black text-emerald-700">{selectedCompletedVisit.cost} INR</span>
+                    {selectedCompletedVisit.diagnosis && (
+                      <div className="rounded-xl bg-muted/30 border border-border/60 p-3 space-y-1.5">
+                        <span className="font-bold text-foreground block">🩺 Diagnosis</span>
+                        <p className="text-muted-foreground">{selectedCompletedVisit.diagnosis}</p>
+                        {selectedCompletedVisit.prescription && (
+                          <>
+                            <span className="font-bold text-foreground block pt-1">💊 Prescription</span>
+                            <p className="text-muted-foreground">{selectedCompletedVisit.prescription}</p>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Invoice */}
+                    {selectedCompletedVisit.invoice && (
+                      <div className="rounded-xl bg-muted/20 border border-border/60 p-3 space-y-1.5">
+                        <div className="flex justify-between items-center font-bold text-foreground">
+                          <span>Invoice #{selectedCompletedVisit.invoice.invoice_number || "MT-INV"}</span>
+                          <span className="font-mono text-emerald-600">
+                            {selectedCompletedVisit.invoice.currency || "USD"}{" "}
+                            {selectedCompletedVisit.invoice.total_amount ?? 0}
+                          </span>
+                        </div>
+                        {Array.isArray(selectedCompletedVisit.invoice.line_items) && (
+                          <div className="space-y-0.5 pt-1 text-[11px] text-muted-foreground border-t border-border/40">
+                            {selectedCompletedVisit.invoice.line_items.map((li, idx) => (
+                              <div key={idx} className="flex justify-between">
+                                <span>{li.description}</span>
+                                <span className="font-mono">
+                                  {selectedCompletedVisit.invoice?.currency || "USD"}{" "}
+                                  {(li.quantity * li.unit_price).toFixed(2)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex justify-between items-center">
+                      <div>
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase block">
+                          Total Bill
+                        </span>
+                        <span className="text-xl font-black text-emerald-700">
+                          {selectedCompletedVisit.cost}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase block">
+                          Report Fee
+                        </span>
+                        <span className="text-sm font-bold text-emerald-700">$15 USD</span>
+                      </div>
                     </div>
 
-                    <Button
-                      onClick={() => handleDownloadReceipt(selectedCompletedVisit)}
-                      className="w-full h-11 rounded-xl bg-emerald-600 text-white font-extrabold text-xs"
-                    >
-                      Print / Download Full Insurance PDF
-                    </Button>
+                    <div className="flex gap-2 pt-1">
+                      <Button
+                        onClick={() => {
+                          setSessionModalVisit(selectedCompletedVisit);
+                          setIsSessionModalOpen(true);
+                        }}
+                        variant="outline"
+                        className="flex-1 h-11 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5"
+                      >
+                        <FiEye className="h-4 w-4" /> View Full Session
+                      </Button>
+
+                      <Button
+                        onClick={() => {
+                          setClaimVisit(selectedCompletedVisit);
+                          setIsClaimOpen(true);
+                        }}
+                        className={`flex-1 h-11 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-xs ${
+                          selectedCompletedVisit.claimPurchased
+                            ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                            : "bg-amber-500 text-white hover:bg-amber-600"
+                        }`}
+                      >
+                        {selectedCompletedVisit.claimPurchased ? (
+                          <>
+                            <FiDownload className="h-4 w-4" />
+                            Download Mediclaim
+                          </>
+                        ) : (
+                          <>
+                            <FiShield className="h-4 w-4" />
+                            Generate Report ($15)
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <div className="p-12 text-center text-muted-foreground text-xs italic">
@@ -596,6 +889,155 @@ function VisitsPage() {
 
       <MobileNav onOpenMedicalId={() => setIsMedicalIdOpen(true)} />
       <QuickMedicalIdModal isOpen={isMedicalIdOpen} onClose={() => setIsMedicalIdOpen(false)} />
+
+      {/* Doctor QR Scanner */}
+      <QrScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScanSuccess={handleQrScanSuccess}
+      />
+
+      {/* Verified Claim Purchase / Download */}
+      <ClaimPurchaseModal
+        isOpen={isClaimOpen}
+        onClose={() => setIsClaimOpen(false)}
+        visit={claimVisit}
+        onSuccess={() => {
+          loadVisitsLedger();
+        }}
+      />
+
+      {/* Full Session Documentation Modal */}
+      {sessionModalVisit && (
+        <Dialog open={isSessionModalOpen} onOpenChange={setIsSessionModalOpen}>
+          <DialogContent className="rounded-3xl max-w-lg p-0 gap-0 overflow-hidden max-h-[90vh] flex flex-col">
+            <DialogHeader className="px-6 pt-5 pb-3 border-b border-border shrink-0">
+              <DialogTitle className="text-base font-bold flex items-center gap-2">
+                <FiFileText className="h-4 w-4 text-primary" />
+                Session Documentation — {sessionModalVisit.appointmentCode || sessionModalVisit.id}
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {/* Patient Details */}
+              <div className="p-4 rounded-2xl bg-muted/30 border border-border/70 space-y-2 text-xs">
+                <h4 className="font-extrabold text-foreground uppercase tracking-wider text-[11px] text-primary">
+                  Patient & Facility Details
+                </h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-muted-foreground font-semibold block">Patient</span>
+                    <span className="font-bold text-foreground">
+                      {sessionModalVisit.patientName || getPatientName() || "Valued Tourist Guest"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground font-semibold block">Facility</span>
+                    <span className="font-bold text-foreground">{sessionModalVisit.facilityName}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground font-semibold block">Doctor</span>
+                    <span className="font-bold text-foreground">
+                      {sessionModalVisit.assignedDoctor ? `Dr. ${sessionModalVisit.assignedDoctor}` : "Attending Physician"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground font-semibold block">Department</span>
+                    <span className="font-bold text-foreground">{sessionModalVisit.department || "General Medicine"}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground font-semibold block">Visit Time</span>
+                    <span className="font-bold text-foreground">{new Date(sessionModalVisit.timestamp).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground font-semibold block">Reason</span>
+                    <span className="font-bold text-foreground">{sessionModalVisit.symptoms?.join(", ") || "Walk-In"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Clinical Section */}
+              <div className="p-4 rounded-2xl bg-muted/30 border border-border/70 space-y-2.5 text-xs">
+                <h4 className="font-extrabold text-foreground uppercase tracking-wider text-[11px] text-primary">
+                  Clinical Record
+                </h4>
+                <div>
+                  <span className="font-bold text-foreground block">🩺 Diagnosis</span>
+                  <p className="text-muted-foreground mt-0.5">{sessionModalVisit.diagnosis || "No diagnosis recorded."}</p>
+                </div>
+                {sessionModalVisit.prescription && (
+                  <div className="pt-2 border-t border-border/40">
+                    <span className="font-bold text-foreground block">💊 Prescription</span>
+                    <p className="text-muted-foreground mt-0.5">{sessionModalVisit.prescription}</p>
+                  </div>
+                )}
+                {sessionModalVisit.diagnosisNotes && (
+                  <div className="pt-2 border-t border-border/40">
+                    <span className="font-bold text-foreground block">Clinical Notes</span>
+                    <p className="text-muted-foreground mt-0.5">{sessionModalVisit.diagnosisNotes}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Invoice Section */}
+              {sessionModalVisit.invoice ? (
+                <div className="p-4 rounded-2xl bg-muted/30 border border-border/70 space-y-2 text-xs">
+                  <div className="flex justify-between items-center border-b border-border/40 pb-2">
+                    <h4 className="font-extrabold text-foreground uppercase tracking-wider text-[11px] text-emerald-600">
+                      Doctor Invoice ({sessionModalVisit.invoice.invoice_number || "Bill"})
+                    </h4>
+                    <span className="font-mono font-bold text-emerald-600 text-sm">
+                      {sessionModalVisit.invoice.currency || "USD"} {sessionModalVisit.invoice.total_amount ?? 0}
+                    </span>
+                  </div>
+                  {Array.isArray(sessionModalVisit.invoice.line_items) && (
+                    <div className="space-y-1.5 pt-1">
+                      {sessionModalVisit.invoice.line_items.map((li, idx) => (
+                        <div key={idx} className="flex justify-between text-muted-foreground">
+                          <span>{li.description} (x{li.quantity})</span>
+                          <span className="font-mono font-semibold text-foreground">
+                            {sessionModalVisit.invoice?.currency || "USD"}{" "}
+                            {(li.quantity * li.unit_price).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                      {sessionModalVisit.invoice.tax_amount ? (
+                        <div className="flex justify-between text-muted-foreground pt-1 border-t border-border/30">
+                          <span>Tax Amount</span>
+                          <span className="font-mono font-semibold text-foreground">
+                            {sessionModalVisit.invoice.currency || "USD"} {sessionModalVisit.invoice.tax_amount}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+            </div>
+
+            <div className="p-4 border-t border-border bg-card/80 shrink-0 flex gap-2">
+              <Button
+                onClick={() => {
+                  setIsSessionModalOpen(false);
+                  setClaimVisit(sessionModalVisit);
+                  setIsClaimOpen(true);
+                }}
+                className="flex-1 h-11 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs"
+              >
+                {sessionModalVisit.claimPurchased ? "Download Verified Mediclaim" : "Generate Mediclaim ($15)"}
+              </Button>
+              <Button
+                onClick={() => setIsSessionModalOpen(false)}
+                variant="outline"
+                className="h-11 px-5 rounded-2xl font-bold text-xs"
+              >
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

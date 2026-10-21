@@ -36,10 +36,15 @@ def execute_hospital_discovery_workflow(
     raw_candidates: List[Dict[str, Any]],
     latitude: float,
     longitude: float,
-    radius_km: float
+    radius_km: float,
+    pre_enriched: bool = False
 ) -> List[Dict[str, Any]]:
     """
     Executes the complete multi-stage hospital discovery and clinical recommendation pipeline.
+
+    `pre_enriched=True` means the caller already ran Stage 2 (Google AI
+    enrichment/discovery) concurrently with its first-aid call, so the stage is
+    skipped here instead of being paid for a second time on the critical path.
     """
     logger.info(f"[Workflow] Starting discovery for symptoms: '{symptoms}' | Specialty: {target_specialty}")
     
@@ -48,14 +53,18 @@ def execute_hospital_discovery_workflow(
     logger.info(f"[Workflow] After clinical guardrails: {len(compatible_candidates)} candidates remain.")
 
     # Stage 2: Google AI Search Enrichment & Missing Hospital Discovery (Populate DB)
-    enriched_candidates = enrich_or_discover_hospitals_with_ai(
-        db=db,
-        existing_hospitals=compatible_candidates,
-        latitude=latitude,
-        longitude=longitude,
-        radius_km=radius_km
-    )
-    logger.info(f"[Workflow] After AI enrichment & discovery: {len(enriched_candidates)} candidates.")
+    if pre_enriched:
+        enriched_candidates = compatible_candidates
+        logger.info(f"[Workflow] Stage 2 skipped: candidates already enriched by the caller.")
+    else:
+        enriched_candidates = enrich_or_discover_hospitals_with_ai(
+            db=db,
+            existing_hospitals=compatible_candidates,
+            latitude=latitude,
+            longitude=longitude,
+            radius_km=radius_km
+        )
+        logger.info(f"[Workflow] After AI enrichment & discovery: {len(enriched_candidates)} candidates.")
 
     # Stage 3: NVIDIA NIM 7-Hospital Selection (Best, Nearest, and up to 5 Nearby)
     selected_seven = select_and_tier_seven_hospitals(

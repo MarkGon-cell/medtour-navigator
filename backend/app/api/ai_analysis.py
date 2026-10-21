@@ -5,7 +5,7 @@ import json
 import concurrent.futures
 from math import radians, sin, cos, sqrt, atan2
 from typing import Optional, List, Dict, Any, Tuple
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
@@ -31,6 +31,8 @@ from app.services import discovery
 from app.services import google_places
 from app.services.geo import haversine_km
 from app.services.hospital_discovery_orchestrator import execute_hospital_discovery_workflow
+from app.services.ai_hospital_enrichment import enrich_or_discover_hospitals_with_ai
+from app.services.insurance_tpa import resolve_insurance_tpa_profile
 
 load_dotenv()
 
@@ -278,14 +280,15 @@ def draft_first_aid_instructions(symptoms: str) -> Dict[str, Any]:
             )
 
             # Fire parallel NIM calls across fast LLM models (Laguna leads).
-            # Generous per-model timeout so the real AI answer lands before we
-            # fall back to the deterministic Red Cross safety net.
+            # All models run concurrently and the retry pass is a second
+            # round, so a tight first-round timeout keeps the fast answer
+            # fast without losing the fallbacks.
             nim_result = parallel_nim_first_aid(
                 api_key=api_key,
                 system_prompt=system_prompt,
                 user_message=f"PATIENT SYMPTOMS & INCIDENT: {symptoms}",
                 n_parallel=3,
-                per_model_timeout=12.0
+                per_model_timeout=8.0
             )
             if nim_result and "firstAid" in nim_result and len(nim_result["firstAid"]) >= 3:
                 # Enforce emergency classification if red flag is active
@@ -914,6 +917,11 @@ def score_and_rank_hospitals(
             h_copy["review_count"] = rep.get("review_count")
             h_copy["curable"] = cure["curable"]
             h_copy["curability"] = cure["curability"]
+            h_copy["insurance_tpa"] = resolve_insurance_tpa_profile(
+                hospital_name=h.get("name") or "",
+                category=h.get("category") or "",
+                accreditation=h.get("accreditation") or "",
+            )
             scored_hospitals.append(h_copy)
             seen_hospital_ids.add(h_id)
 
@@ -936,10 +944,66 @@ def score_and_rank_hospitals(
                 h_copy["review_count"] = rep.get("review_count")
                 h_copy["curable"] = cure["curable"]
                 h_copy["curability"] = cure["curability"]
+                h_copy["insurance_tpa"] = resolve_insurance_tpa_profile(
+                    hospital_name=h.get("name") or "",
+                    category=h.get("category") or "",
+                    accreditation=h.get("accreditation") or "",
+                )
                 scored_hospitals.append(h_copy)
                 seen_hospital_ids.add(h.get("id"))
 
     return scored_hospitals[:10]
+
+
+@router.post("/transcribe")
+def transcribe_speech(
+    file: UploadFile = File(...),
+):
+    """
+    Speech-to-text for the walk-in voice triage box.
+
+    The Web Speech API the front end uses for dictation is Chromium-only.
+    Firefox and Safari patients record the utterance with MediaRecorder and
+    upload it here, where faster-whisper transcribes it locally -- no speech
+    API key, no audio leaving the machine.
+
+    Kept as a `def` (not `async def`) on purpose: decoding and transcribing are
+    CPU-bound, and FastAPI runs sync routes on its threadpool, so the audio
+    cannot stall the event loop that serves /ai/analyze.
+    """
+    from app.services import speech_to_text
+
+    audio = file.file.read()
+    if not audio:
+        raise HTTPException(
+            status_code=400,
+            detail="That recording was empty. Tap the mic and speak again.",
+        )
+    if len(audio) > speech_to_text.MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="That recording is too long. Keep it to about a minute.",
+        )
+
+    try:
+        text, language = speech_to_text.transcribe(audio, file.content_type or "")
+    except RuntimeError as exc:
+        # Raised with a patient-readable message by the service; surface it
+        # verbatim so the front end can show what actually went wrong.
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - never leak a stack trace to the patient
+        raise HTTPException(
+            status_code=502,
+            detail="Speech-to-text is unavailable right now. Please type your symptoms.",
+        ) from exc
+
+    if not text:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not make out any words. Tap the mic and speak again.",
+        )
+
+    return {"text": text, "language": language}
 
 
 @router.post("/analyze")
@@ -951,10 +1015,6 @@ def analyze_symptoms(
     lat = req.latitude
     lon = req.longitude
     radius_km = req.radius_km or 20.0
-
-    # 1. Fetch candidate hospitals from ALL THREE sources (Postgres + Overpass
-    #    + Geoapify), deduplicated by name + location.
-    candidates = gather_nearby_candidates(db, lat, lon, radius_km)
 
     # Red-flag safety evaluation
     red_flag = evaluate_emergency_red_flags(symptoms)
@@ -970,15 +1030,34 @@ def analyze_symptoms(
                 primary_specialty = spec
                 break
 
-    # 2. Execute Two Parallel Tasks Concurrently
-    # Task 1: Draft First Aid Instructions (NVIDIA NIM / Red Cross Manual)
-    # Task 2: Deterministic Hospital Recommendation & Indexing
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    # 2. Overlap every stage that does not depend on another stage's output:
+    #    Task 1: Draft First Aid Instructions (NVIDIA NIM / Red Cross Manual).
+    #            Needs only the symptom text, so it is submitted FIRST and
+    #            runs while the directory is still being gathered.
+    #    Task 2: Deterministic Hospital Recommendation & Indexing.
+    #    Task 3: Stage-2 AI enrichment/discovery of the same candidate list.
+    #            Tasks 2 and 3 start the moment the candidates exist, which
+    #            is still inside Task 1's flight time.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+    try:
         future_first_aid = executor.submit(draft_first_aid_instructions, symptoms)
-        future_hospitals = executor.submit(score_and_rank_hospitals, symptoms, primary_specialty, candidates, radius_km)
+
+        # Task 4: candidate hospitals from ALL THREE sources (Postgres +
+        # Overpass + Geoapify), deduplicated by name + location. Runs in the
+        # request thread because it owns the `db` session.
+        candidates = gather_nearby_candidates(db, lat, lon, radius_km)
+
+        future_hospitals = executor.submit(
+            score_and_rank_hospitals, symptoms, primary_specialty, candidates, radius_km
+        )
+        future_enriched = executor.submit(
+            enrich_or_discover_hospitals_with_ai, db, candidates, lat, lon, radius_km
+        )
 
         try:
-            first_aid_result = future_first_aid.result(timeout=30.0)
+            # Budget stays above the NIM worst case (2 rounds x per-model
+            # timeout) so a hung provider still reaches the safety fallback.
+            first_aid_result = future_first_aid.result(timeout=20.0)
         except concurrent.futures.TimeoutError:
             if is_emergency:
                 first_aid_result = {
@@ -1000,6 +1079,25 @@ def analyze_symptoms(
         except concurrent.futures.TimeoutError:
             recommended_hospitals = []
 
+        try:
+            # Enrichment was already racing the first-aid call, so this only
+            # waits for whatever part of it is still outstanding. A failed
+            # enrichment must degrade to the raw candidate list rather than
+            # fail the whole triage, exactly as the workflow fallback did.
+            enriched_candidates = future_enriched.result(timeout=16.0)
+        except concurrent.futures.TimeoutError:
+            enriched_candidates = candidates
+        except Exception as enrich_err:
+            try:
+                print(f"[WARN] Stage-2 AI enrichment failed: {enrich_err}", flush=True)
+            except Exception:
+                pass
+            enriched_candidates = candidates
+    finally:
+        # The workers touch the request-scoped `db` session, so none of them
+        # may outlive this block.
+        executor.shutdown(wait=True)
+
     spec_res = (first_aid_result.get("specialty") or primary_specialty).lower()
     if is_emergency:
         specialty = "EMERGENCY"
@@ -1009,17 +1107,18 @@ def analyze_symptoms(
         urgency = first_aid_result.get("urgency", "ROUTINE")
 
     # 3. Execute Complete Hospital Discovery & Enrichment Workflow:
-    #    Clinical Guardrails -> Google AI Search Enrichment -> NVIDIA NIM 7-Hospital Selection -> Google Places Contacts
+    #    Clinical Guardrails -> (Stage-2 enrichment already ran above) -> NVIDIA NIM 7-Hospital Selection -> Google Places Contacts
     try:
         final_workflow_hospitals = execute_hospital_discovery_workflow(
             db=db,
             symptoms=symptoms,
             target_specialty=specialty,
             urgency=urgency,
-            raw_candidates=candidates,
+            raw_candidates=enriched_candidates,
             latitude=lat,
             longitude=lon,
-            radius_km=radius_km
+            radius_km=radius_km,
+            pre_enriched=True
         )
         if final_workflow_hospitals:
             recommended_hospitals = final_workflow_hospitals
@@ -1076,3 +1175,72 @@ def analyze_symptoms(
         "prerequisites": prerequisites,
         "recommendedHospitals": recommended_hospitals,
     }
+
+
+class QuickTriageRequest(BaseModel):
+    symptoms: str
+
+
+@router.post("/triage-firstaid")
+def quick_first_aid_triage(req: QuickTriageRequest):
+    """
+    Sub-second Emergency First Aid & Clinical Triage.
+    Returns immediate Red Cross / NIM first-aid action steps without waiting
+    for hospital geolocation, Overpass queries, or discovery workflows.
+    """
+    symptoms = req.symptoms.strip()
+    if not symptoms:
+        raise HTTPException(status_code=400, detail="Symptoms text required.")
+
+    # Red-flag safety evaluation
+    red_flag = evaluate_emergency_red_flags(symptoms)
+    is_emergency = red_flag.get("is_emergency", False)
+
+    first_aid_result = draft_first_aid_instructions(symptoms)
+
+    if is_emergency:
+        specialty = "EMERGENCY"
+        urgency = "EMERGENCY"
+    else:
+        specialty = first_aid_result.get("specialty", "General Medicine")
+        urgency = first_aid_result.get("urgency", "ROUTINE")
+
+    summary = first_aid_result.get("summary")
+    if not summary:
+        if is_emergency:
+            summary = f"Emergency medical triage activated for {red_flag.get('primary_condition', 'acute trauma')}."
+        else:
+            summary = f"Detected symptoms requiring {specialty} evaluation."
+
+    first_aid = first_aid_result.get("firstAid")
+    if not first_aid:
+        if is_emergency:
+            first_aid = red_flag.get("safety_first_aid", DEFAULT_FIRST_AID["emergency"])
+        else:
+            spec_key = specialty.lower()
+            first_aid = DEFAULT_FIRST_AID.get(spec_key, DEFAULT_FIRST_AID["general medicine"])
+
+    prerequisites = first_aid_result.get("prerequisites")
+    if not prerequisites:
+        if is_emergency:
+            prerequisites = red_flag.get("prerequisites", [
+                "Call 108 for emergency ambulance transport immediately",
+                "Keep patient stationary and monitor breathing continuously",
+                "Alert emergency trauma department before arrival"
+            ])
+        else:
+            prerequisites = [
+                "Carry government photo ID proof (Passport / Aadhar / Driver's License)",
+                "Bring previous doctor prescriptions and medical records",
+                "Keep emergency contact phone numbers accessible",
+                "Wear comfortable, loose-fitting clothing"
+            ]
+
+    return {
+        "specialty": specialty,
+        "urgency": urgency,
+        "summary": summary,
+        "firstAid": first_aid,
+        "prerequisites": prerequisites,
+    }
+

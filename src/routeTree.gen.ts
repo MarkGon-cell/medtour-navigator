@@ -10,7 +10,9 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DoctorRouteImport } from './routes/doctor'
 import { Route as LandingRouteImport } from './routes/landing'
+import { Route as VerificationStatusRouteImport } from './routes/verificationStatus'
 import { Route as VisitsRouteImport } from './routes/visits'
 import { Route as WalkInRouteImport } from './routes/walk-in'
 
@@ -19,9 +21,19 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DoctorRoute = DoctorRouteImport.update({
+  id: '/doctor',
+  path: '/doctor',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LandingRoute = LandingRouteImport.update({
   id: '/landing',
   path: '/landing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerificationStatusRoute = VerificationStatusRouteImport.update({
+  id: '/verificationStatus',
+  path: '/verificationStatus',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VisitsRoute = VisitsRouteImport.update({
@@ -37,34 +49,61 @@ const WalkInRoute = WalkInRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/doctor': typeof DoctorRoute
   '/landing': typeof LandingRoute
+  '/verificationStatus': typeof VerificationStatusRoute
   '/visits': typeof VisitsRoute
   '/walk-in': typeof WalkInRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/doctor': typeof DoctorRoute
   '/landing': typeof LandingRoute
+  '/verificationStatus': typeof VerificationStatusRoute
   '/visits': typeof VisitsRoute
   '/walk-in': typeof WalkInRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/doctor': typeof DoctorRoute
   '/landing': typeof LandingRoute
+  '/verificationStatus': typeof VerificationStatusRoute
   '/visits': typeof VisitsRoute
   '/walk-in': typeof WalkInRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/landing' | '/visits' | '/walk-in'
+  fullPaths:
+    | '/'
+    | '/doctor'
+    | '/landing'
+    | '/verificationStatus'
+    | '/visits'
+    | '/walk-in'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/landing' | '/visits' | '/walk-in'
-  id: '__root__' | '/' | '/landing' | '/visits' | '/walk-in'
+  to:
+    | '/'
+    | '/doctor'
+    | '/landing'
+    | '/verificationStatus'
+    | '/visits'
+    | '/walk-in'
+  id:
+    | '__root__'
+    | '/'
+    | '/doctor'
+    | '/landing'
+    | '/verificationStatus'
+    | '/visits'
+    | '/walk-in'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DoctorRoute: typeof DoctorRoute
   LandingRoute: typeof LandingRoute
+  VerificationStatusRoute: typeof VerificationStatusRoute
   VisitsRoute: typeof VisitsRoute
   WalkInRoute: typeof WalkInRoute
 }
@@ -78,11 +117,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/doctor': {
+      id: '/doctor'
+      path: '/doctor'
+      fullPath: '/doctor'
+      preLoaderRoute: typeof DoctorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/landing': {
       id: '/landing'
       path: '/landing'
       fullPath: '/landing'
       preLoaderRoute: typeof LandingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verificationStatus': {
+      id: '/verificationStatus'
+      path: '/verificationStatus'
+      fullPath: '/verificationStatus'
+      preLoaderRoute: typeof VerificationStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/visits': {
@@ -104,7 +157,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DoctorRoute: DoctorRoute,
   LandingRoute: LandingRoute,
+  VerificationStatusRoute: VerificationStatusRoute,
   VisitsRoute: VisitsRoute,
   WalkInRoute: WalkInRoute,
 }

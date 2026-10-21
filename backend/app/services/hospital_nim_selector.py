@@ -77,7 +77,7 @@ def select_and_tier_seven_hospitals(
                 system_prompt=system_prompt,
                 user_message=user_prompt,
                 expect_key="matched_hospitals",
-                per_model_timeout=14.0,
+                per_model_timeout=8.0,
                 max_retries=1
             )
         except Exception as e:

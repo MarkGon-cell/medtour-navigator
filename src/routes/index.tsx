@@ -3,11 +3,17 @@ import { MobileNav } from "@/components/site/MobileNav.tsx";
 import { QuickMedicalIdModal } from "@/components/site/QuickMedicalIdModal";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FiPhone, FiCopy, FiMapPin, FiShield, FiNavigation } from "react-icons/fi";
+import { FiPhone, FiCopy, FiMapPin, FiNavigation } from "react-icons/fi";
 import { FaCar, FaLocationArrow } from "react-icons/fa";
 import { toast } from "sonner";
-import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import api from "@/lib/api";
+import {
+  describeGeolocationFailure,
+  isPosition,
+  readPosition,
+  type GeolocationOutcome,
+} from "@/lib/geolocation";
 import { LocationMap, type DispatchMode } from "@/components/site/LocationMap";
 import { RefreshLocationIcon } from "@/components/site/RefreshLocationIcon";
 import { PageHeader } from "@/components/site/PageHeader";
@@ -24,7 +30,9 @@ export const Route = createFileRoute("/")({
 
 const HOME_SESSION_KEY = "medtour_tab_home_state";
 
-function getInitialHomeState() {
+// Read the Home tab state saved by the previous visit. Called AFTER mount --
+// never during render -- see the restore effect below.
+function readSavedHomeState() {
   if (typeof window === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(HOME_SESSION_KEY);
@@ -35,11 +43,14 @@ function getInitialHomeState() {
 
 function Landing() {
   const navigate = useNavigate();
-  const savedState = useMemo(() => getInitialHomeState(), []);
 
-  const [addressString, setAddressString] = useState<string>(savedState?.addressString || "Locating GPS position...");
-  const [cityStateString, setCityStateString] = useState<string>(savedState?.cityStateString || "Fetching coordinates...");
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(savedState?.userLocation || null);
+  // Defaults must match what the server renders. sessionStorage is read in an
+  // effect further down: the server has no sessionStorage, so any value read
+  // here would make the first client render differ from the server HTML and
+  // React would discard the hydrated subtree with a hydration mismatch.
+  const [addressString, setAddressString] = useState<string>("Locating GPS position...");
+  const [cityStateString, setCityStateString] = useState<string>("Fetching coordinates...");
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isMedicalIdOpen, setIsMedicalIdOpen] = useState(false);
   const [isDriverCardOpen, setIsDriverCardOpen] = useState(false);
 
@@ -58,13 +69,34 @@ function Landing() {
     isGeneralOrMultispeciality?: boolean;
   };
 
-  const [nearestHospital, setNearestHospital] = useState<NearestHospital | null>(savedState?.nearestHospital || null);
+  const [nearestHospital, setNearestHospital] = useState<NearestHospital | null>(null);
   const [isFindingEr, setIsFindingEr] = useState(false);
-  const [erStatus, setErStatus] = useState<"idle" | "searching" | "found" | "empty" | "error">(savedState?.erStatus || "idle");
+  const [erStatus, setErStatus] = useState<"idle" | "searching" | "found" | "empty" | "error">(
+    "idle",
+  );
 
   // Refreshing GPS: the blue pin in the Uber/OLA bar re-runs this.
   const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
   const erRequestSeq = useRef(0);
+
+  // Restore the previous visit on mount -- AFTER the server has had its say.
+  // This runs before the persistence effect below (effects fire in
+  // declaration order), so it reads sessionStorage before that effect can
+  // overwrite it with the defaults from this render.
+  const didRestoreHome = useRef(false);
+  useEffect(() => {
+    if (didRestoreHome.current) return;
+    didRestoreHome.current = true;
+
+    const saved = readSavedHomeState();
+    if (!saved) return;
+
+    if (saved.addressString) setAddressString(saved.addressString);
+    if (saved.cityStateString) setCityStateString(saved.cityStateString);
+    if (saved.userLocation) setUserLocation(saved.userLocation);
+    if (saved.nearestHospital) setNearestHospital(saved.nearestHospital);
+    if (saved.erStatus) setErStatus(saved.erStatus);
+  }, []);
 
   // Persist Home tab state
   useEffect(() => {
@@ -172,47 +204,116 @@ function Landing() {
 
     setIsRefreshingLocation(true);
 
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        setUserLocation({ lat, lng });
+    // Failure path: releases the refreshing flag so the pin can never be left
+    // spinning, and says WHY location is unavailable. Every branch now
+    // explains itself -- codes 2 (no fix: Location toggle off, no GPS in
+    // sight) and 3 (timeout) used to fall back in silence, which on a phone
+    // meant the page showed the default Bandra address as though it were the
+    // patient's own position.
+    const fallBackToSavedLocation = (reason?: string) => {
+      console.warn("[geolocation] using the default position instead:", reason ?? "no reason");
+      setAddressString("Bandra Kurla Complex Rd, Bandra East");
+      setCityStateString("Mumbai, Maharashtra • 19.0760° N, 72.8777° E");
+      setUserLocation({ lat: 19.0760, lng: 72.8777 });
+      setErStatus("error");
+      setIsRefreshingLocation(false);
+      if (reason) toast.error(reason);
+    };
 
-        // Reverse geocode live coordinates using Nominatim API
-        try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-            { headers: { "Accept-Language": "en" } }
-          );
-          const data = await res.json();
-          if (data && data.address) {
-            const road = data.address.road || data.address.suburb || data.address.neighbourhood || data.address.residential || data.address.village || "Current Location";
-            const city = data.address.city || data.address.town || data.address.city_district || data.address.suburb || data.address.county || "Maharashtra";
-            const state = data.address.state || "Maharashtra";
-            setAddressString(`${road}`);
-            setCityStateString(`${city}, ${state} • ${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`);
-          } else {
-            setAddressString(`GPS Position (${lat.toFixed(4)}°, ${lng.toFixed(4)}°)`);
-            setCityStateString(`${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`);
+    // Two-stage read -- cheap cache/Wi-Fi fix first, then a longer GPS wait --
+    // so a phone indoors gets a real chance to answer. See lib/geolocation.
+    let outcome: GeolocationOutcome;
+    try {
+      outcome = await readPosition();
+    } catch {
+      fallBackToSavedLocation("Couldn't read your location. Tap the blue pin to try again.");
+      return;
+    }
+
+    try {
+      if (!isPosition(outcome)) {
+        // Chrome's own reason travels on `message` ("No location was
+        // available.", "The Last Position Provider Has Been Unbound.", …).
+        // It is the one clue that separates a blocked permission from a
+        // device with no location source at all, so never swallow it.
+        console.warn(
+          "[geolocation] readPosition failed: code=%s message=%o",
+          outcome?.code,
+          outcome?.message,
+        );
+        fallBackToSavedLocation(describeGeolocationFailure(outcome));
+        return;
+      }
+      const pos = outcome;
+
+      // Some implementations report success without carrying a position
+      // (seen as `pos.coords is undefined`). Treat that as a failure instead
+      // of throwing -- a throw here used to skip setIsRefreshingLocation
+      // entirely and freeze the pin forever -- but log the raw payload so the
+      // console identifies the culprit.
+      const lat = pos?.coords?.latitude;
+      const lng = pos?.coords?.longitude;
+      if (
+        typeof lat !== "number" ||
+        typeof lng !== "number" ||
+        Number.isNaN(lat) ||
+        Number.isNaN(lng)
+      ) {
+        console.warn("[geolocation] unusable position payload:", pos);
+        fallBackToSavedLocation(
+          typeof window !== "undefined" && !window.isSecureContext
+            ? // Firefox and Chrome both withhold coordinates on non-secure
+              // origins -- 192.168.x.x over plain HTTP is not one, and
+              // neither browser can be configured to allow it.
+              "This address isn't secure, so the browser won't share your coordinates. Use https:// or localhost."
+            : "Your browser returned a position without coordinates. Tap the blue pin to try again.",
+        );
+        return;
+      }
+      setUserLocation({ lat, lng });
+
+      // Send the coordinates to the backend FIRST. Reverse geocoding
+      // below is cosmetic (it only fills in a street name) and runs on a
+      // third-party host with no timeout of its own -- awaiting it before
+      // the search meant one stalled Nominatim request kept the patient's
+      // location from ever reaching /hospitals/nearby.
+      const erLookup = fetchNearestEr(lat, lng);
+
+      // Reverse geocode live coordinates using Nominatim API (best effort,
+      // 5s cap, never allowed to hold up the search above).
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+          {
+            headers: { "Accept-Language": "en" },
+            signal: typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+              ? AbortSignal.timeout(5000)
+              : undefined,
           }
-        } catch {
+        );
+        const data = await res.json();
+        if (data && data.address) {
+          const road = data.address.road || data.address.suburb || data.address.neighbourhood || data.address.residential || data.address.village || "Current Location";
+          const city = data.address.city || data.address.town || data.address.city_district || data.address.suburb || data.address.county || "Maharashtra";
+          const state = data.address.state || "Maharashtra";
+          setAddressString(`${road}`);
+          setCityStateString(`${city}, ${state} • ${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`);
+        } else {
           setAddressString(`GPS Position (${lat.toFixed(4)}°, ${lng.toFixed(4)}°)`);
           setCityStateString(`${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`);
         }
+      } catch {
+        setAddressString(`GPS Position (${lat.toFixed(4)}°, ${lng.toFixed(4)}°)`);
+        setCityStateString(`${lat.toFixed(4)}° N, ${lng.toFixed(4)}° E`);
+      }
 
-        // Walk the radius ladder outward until an ER turns up.
-        await fetchNearestEr(lat, lng);
-        setIsRefreshingLocation(false);
-      },
-      () => {
-        setAddressString("Bandra Kurla Complex Rd, Bandra East");
-        setCityStateString("Mumbai, Maharashtra • 19.0760° N, 72.8777° E");
-        setUserLocation({ lat: 19.0760, lng: 72.8777 });
-        setErStatus("error");
-        setIsRefreshingLocation(false);
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-    );
+      // Walk the radius ladder outward until an ER turns up.
+      await erLookup;
+    } catch {
+      setErStatus("error");
+    } finally {
+      setIsRefreshingLocation(false);
+    }
   }, [fetchNearestEr]);
 
   useEffect(() => {
@@ -315,7 +416,7 @@ function Landing() {
   // the page, and the map now sits last in the stack. pb-44 alone left the
   // map's lower edge under the Uber/OLA bar.
   return (
-    <div className="min-h-screen bg-background pb-56 font-sans">
+    <div className="min-h-screen bg-background pb-40 font-sans">
       {/* Top Center Minimal MedTour Brand (Takes user to /landing) */}
       <header className="w-full pt-4 pb-2 flex items-center justify-center">
         <button
@@ -323,17 +424,19 @@ function Landing() {
           className="group inline-flex items-center gap-2 px-4 py-1.5 rounded-full hover:bg-muted/60 transition-all cursor-pointer focus:outline-none"
           aria-label="MedTour Landing Page"
         >
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-primary text-primary-foreground shadow-xs group-hover:scale-105 transition-transform">
-            <FiShield className="h-4 w-4" />
-          </span>
           <span className="text-xl font-black tracking-tight text-foreground group-hover:opacity-85 transition-opacity">
             MedTour
           </span>
         </button>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-2 space-y-4">
+      <main className="max-w-3xl lg:max-w-7xl xl:max-w-[90rem] mx-auto px-4 py-2 space-y-4 lg:grid lg:grid-cols-12 lg:gap-6 lg:items-stretch lg:space-y-0 lg:min-h-[calc(100vh-15rem)]">
         
+        {/* LEFT COLUMN (mobile stack / desktop col-span-5).
+            Desktop uses the grid's default `align-items: stretch`, so this
+            column and the map are always the same height and share a bottom
+            edge — see the min-h on <main> for where that edge lands. */}
+        <div className="space-y-4 lg:col-span-5 lg:flex lg:flex-col">
         {/* ZONE 1: NEAREST HOSPITAL & GET DIRECTIONS BUTTON */}
         <div className="p-4 sm:p-5 rounded-3xl border-2 border-primary/40 bg-card space-y-3 sm:space-y-4 shadow-sm">
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5">
@@ -474,6 +577,11 @@ function Landing() {
           </div>
         )}
 
+        {/* Fills the desktop slack so the GPS card sits on the same bottom
+            edge as the map instead of the column ending in dead space.
+            Hidden on mobile where the stack just flows. */}
+        <div className="hidden lg:block flex-1" aria-hidden="true" />
+
         {/* MIDDLE ZONE: LIVE GPS LOCATION READOUT (tap to re-locate) */}
         <div
           onClick={handleRefreshLocation}
@@ -501,19 +609,23 @@ function Landing() {
             <FiCopy className="h-3.5 w-3.5" /> Copy
           </button>
         </div>
+        </div>
 
-        {/* LOCATION MAP — always shows where you are; once Uber / Ola /
-            ambulance is requested it also drops the destination and the
-            line between the two. */}
-        {userLocation && (
-          <LocationMap
-            latitude={userLocation.lat}
-            longitude={userLocation.lng}
-            target={dispatch?.target ?? null}
-            mode={dispatch?.mode}
-            caption={`${addressString} • ${cityStateString}`}
-          />
-        )}
+        {/* RIGHT COLUMN (desktop only): LOCATION MAP — mobile renders it below in the same stack.
+            On desktop the map now fills the column height instead of sitting as a
+            short 16rem strip with a dead gap under it. */}
+        <div className="lg:col-span-7 lg:flex lg:flex-col lg:min-h-0">
+          {userLocation && (
+            <LocationMap
+              latitude={userLocation.lat}
+              longitude={userLocation.lng}
+              target={dispatch?.target ?? null}
+              mode={dispatch?.mode}
+              caption={`${addressString} • ${cityStateString}`}
+              viewportClassName="h-42 w-full sm:h-52 lg:h-[calc(100vh-11rem)]"
+            />
+          )}
+        </div>
 
       </main>
 

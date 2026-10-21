@@ -76,7 +76,7 @@ def enrich_or_discover_hospitals_with_ai(
                 system_prompt=system_prompt,
                 user_message=user_prompt,
                 expect_key="enriched",
-                per_model_timeout=12.0,
+                per_model_timeout=6.0,
                 max_retries=1
             )
         except Exception as e:

@@ -5,8 +5,21 @@
 //     React/TanStack dedupe, error logger plugins, and sandbox detection (port/host/strictPort).
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 
 export default defineConfig({
+  // HTTPS for the dev server. The Geolocation API and getUserMedia (the
+  // walk-in microphone) are both restricted to secure contexts, and neither
+  // Chrome nor Firefox can be configured to relax that: served from plain
+  // http://192.168.x.x:8080 the browser grants the permission prompt and then
+  // hands back an EMPTY position, so location and voice can never work over
+  // the network. localhost and https:// are the only exemptions.
+  //
+  // The dev URL therefore becomes https://localhost:8080 and
+  // https://<lan-ip>:8080. The certificate is self-signed, so each device
+  // shows a one-time warning to click past (Advanced -> Proceed), and the
+  // /api proxy to FastAPI keeps working unchanged.
+  plugins: [basicSsl()],
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
@@ -25,12 +38,21 @@ export default defineConfig({
         "/ai": "http://127.0.0.1:8000",
         "/emergency": "http://127.0.0.1:8000",
         "/appointments": "http://127.0.0.1:8000",
+        // The doctor PORTAL page is the frontend route /doctor (no trailing
+        // segment); the API paths are /doctor/appointments, /doctor/diagnosis,
+        // /doctor/auth/login, /doctor/claim/<code>, … — trailing slash only.
+        // Proxying bare /doctor would send the page request to FastAPI (404).
+        "^/doctor/": "http://127.0.0.1:8000",
         "/admin": "http://127.0.0.1:8000",
         "/waiting-time": "http://127.0.0.1:8000",
         "/waiting-observations": "http://127.0.0.1:8000",
         "/profile": "http://127.0.0.1:8000",
         "/health": "http://127.0.0.1:8000",
         "/v1": "http://127.0.0.1:8000",
+        "/api": {
+          target: "http://127.0.0.1:8000",
+          rewrite: (path: string) => path.replace(/^\/api/, ""),
+        },
         // Frontend route is exactly /hospitals (list page); API paths are
         // /hospitals/<id>, /hospitals/nearby, etc. — trailing slash only.
         "^/hospitals/": "http://127.0.0.1:8000",

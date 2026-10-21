@@ -4,28 +4,27 @@ from sqlalchemy import (
     Integer,
     String,
     DateTime,
-    ForeignKey,
     Float,
     Text,
     Boolean,
 )
-from sqlalchemy.orm import relationship
 
 from app.database.database import Base
 
 
 class SOSAlert(Base):
+    """
+    Anonymous SOS log.
+
+    Deliberately holds NO user identity (no account, name, or email — there
+    are no patient accounts at all). What it keeps is the operational payload
+    an emergency responder needs: where the call came from, the message, and
+    where it sits in the dispatch lifecycle.
+    """
+
     __tablename__ = "sos_alerts"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(
-        Integer,
-        ForeignKey("users.id"),
-        nullable=True,
-        index=True,
-    )
-    user_name = Column(String, nullable=True)
-    email = Column(String, nullable=True)
 
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
@@ -50,5 +49,3 @@ class SOSAlert(Base):
         onupdate=datetime.utcnow,
         nullable=False,
     )
-
-    user = relationship("User", lazy="joined")

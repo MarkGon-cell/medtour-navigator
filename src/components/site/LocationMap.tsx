@@ -19,6 +19,12 @@ type LocationMapProps = {
   mode?: DispatchMode;
   /** Shown under the header, e.g. "Vasai Road, Vasai-Virar". */
   caption?: string;
+  /**
+   * Classes for the map viewport itself. Defaults to the compact mobile
+   * height; pass a taller class on desktop so the map tracks the column
+   * beside it instead of leaving a dead gap underneath.
+   */
+  viewportClassName?: string;
 };
 
 const MODE_STYLE: Record<DispatchMode, { label: string; color: string }> = {
@@ -43,6 +49,7 @@ export function LocationMap({
   target,
   mode,
   caption,
+  viewportClassName = "h-52 w-full sm:h-64",
 }: LocationMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
@@ -179,7 +186,7 @@ export function LocationMap({
     // those values escape into the page and paint over the z-40 Uber/OLA
     // bar and the MobileNav. Isolating here traps them, so the map sits
     // under the floating bars no matter what Leaflet asks for.
-    <div className="relative isolate z-0 overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs">
+    <div className="relative isolate z-0 overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs lg:flex lg:flex-col lg:h-full lg:min-h-0">
       {style && target && (
         <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
           <span
@@ -194,10 +201,13 @@ export function LocationMap({
         </div>
       )}
 
-      <div ref={containerRef} className="h-52 w-full sm:h-64" />
+      {/* On desktop the viewport flexes to fill the column so the map and the
+          stack beside it share a bottom edge; below lg it keeps its fixed
+          mobile heights. `min-h-0` lets it shrink inside the flex column. */}
+      <div ref={containerRef} className={`${viewportClassName} lg:flex-1 lg:h-auto lg:min-h-0`} />
 
       {caption && (
-        <div className="border-t border-border px-3 py-2 text-[11px] font-semibold text-muted-foreground truncate">
+        <div className="border-t border-border px-3 py-2 text-[11px] font-semibold text-muted-foreground truncate shrink-0">
           {caption}
         </div>
       )}

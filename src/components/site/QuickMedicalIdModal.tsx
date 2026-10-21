@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { FiPhone, FiX, FiPlus, FiAlertTriangle, FiEye, FiEyeOff, FiLogOut } from 'react-icons/fi';
-import { HiOutlineIdentification } from 'react-icons/hi2';
+import { FiPhone, FiX, FiPlus, FiAlertTriangle, FiEye, FiEyeOff, FiLogOut, FiTrash2, FiLoader, FiShield } from 'react-icons/fi';
+import { HiOutlineIdentification, HiOutlineShieldCheck } from 'react-icons/hi2';
 import { toast } from 'sonner';
 
 export interface MedicalIdData {
@@ -68,12 +68,22 @@ export function QuickMedicalIdModal({ isOpen, onClose }: { isOpen: boolean; onCl
   const [passwordMode, setPasswordMode] = useState<"export" | "import">("export");
   const [passwordInput, setPasswordInput] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isDecrypting, setIsDecrypting] = useState(false);
   const [selectedMtrFile, setSelectedMtrFile] = useState<File | null>(null);
   const [stagedMtrContent, setStagedMtrContent] = useState<string | null>(() => {
     if (typeof window !== "undefined") {
       return sessionStorage.getItem("medtour_staged_mtr");
     }
     return null;
+  });
+
+  // Selective Data Clear Modal States
+  const [showClearDataModal, setShowClearDataModal] = useState(false);
+  const [clearOptions, setClearOptions] = useState({
+    clinicalAlerts: true,
+    emergencyContact: false,
+    insuranceInfo: false,
+    allVisits: false,
   });
 
   // Optional Master Password set when creating/editing new ID
@@ -126,6 +136,8 @@ export function QuickMedicalIdModal({ isOpen, onClose }: { isOpen: boolean; onCl
     }
   };
 
+  const [isEncrypting, setIsEncrypting] = useState(false);
+
   const handleConfirmPassword = async () => {
     if (!passwordInput || passwordInput.trim().length < 4) {
       toast.error("Password must be at least 4 characters.");
@@ -133,7 +145,9 @@ export function QuickMedicalIdModal({ isOpen, onClose }: { isOpen: boolean; onCl
     }
 
     if (passwordMode === "export") {
+      setIsEncrypting(true);
       try {
+        await new Promise((resolve) => setTimeout(resolve, 500));
         const { exportMtrDatabaseFile } = await import("@/lib/mtrDatabase");
         const res = await exportMtrDatabaseFile(passwordInput);
         if (res.method === "share") {
@@ -145,6 +159,8 @@ export function QuickMedicalIdModal({ isOpen, onClose }: { isOpen: boolean; onCl
         setPasswordInput("");
       } catch (err: any) {
         toast.error(err.message || "Failed to export .mtr file.");
+      } finally {
+        setIsEncrypting(false);
       }
     } else if (passwordMode === "import") {
       const fileToImport = stagedMtrContent || selectedMtrFile;
@@ -152,7 +168,10 @@ export function QuickMedicalIdModal({ isOpen, onClose }: { isOpen: boolean; onCl
         toast.error("No .mtr file selected.");
         return;
       }
+      setIsDecrypting(true);
       try {
+        // Subtle brief delay to show decrypting animation & key derivation
+        await new Promise((resolve) => setTimeout(resolve, 600));
         const { importMtrDatabaseFile } = await import("@/lib/mtrDatabase");
         const res = await importMtrDatabaseFile(fileToImport, passwordInput);
         toast.success(`Encrypted .mtr restored successfully! Loaded profile & ${res.visitCount} visits.`);
@@ -166,7 +185,103 @@ export function QuickMedicalIdModal({ isOpen, onClose }: { isOpen: boolean; onCl
         }
       } catch (err: any) {
         toast.error(err.message || "Failed to decrypt .mtr file. Access denied.");
+      } finally {
+        setIsDecrypting(false);
       }
+    }
+  };
+
+  const [completedVisitsList, setCompletedVisitsList] = useState<Array<{ id: string; facilityName: string; appointmentCode?: string; timestamp: number }>>([]);
+  const [selectedVisitIdsToDelete, setSelectedVisitIdsToDelete] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (showClearDataModal) {
+      try {
+        const rawVisits = localStorage.getItem("medtour_visits");
+        if (rawVisits) {
+          const parsed = JSON.parse(rawVisits);
+          if (Array.isArray(parsed)) {
+            const completed = parsed.filter((v: any) => v.status === "completed");
+            setCompletedVisitsList(completed);
+            setSelectedVisitIdsToDelete([]);
+          }
+        }
+      } catch (err) {
+        console.warn("Error parsing visits for clear dialog:", err);
+      }
+    }
+  }, [showClearDataModal]);
+
+  const handleClearSelectedData = async () => {
+    try {
+      const updated: MedicalIdData = { ...data };
+
+      if (clearOptions.clinicalAlerts) {
+        updated.allergies = "";
+        updated.conditions = "";
+        updated.medications = "";
+        updated.medicalNotes = "";
+      }
+      if (clearOptions.emergencyContact) {
+        updated.emergencyContactName = "";
+        updated.emergencyContactPhone = "";
+        updated.emergencyContactRelation = "Family";
+      }
+      if (clearOptions.insuranceInfo) {
+        updated.insurancePolicyNo = "";
+        updated.insuranceProvider = "";
+      }
+
+      // 1. Update localStorage
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      setData(updated);
+
+      // 2. Selectively delete visits or clear all
+      let updatedVisits: any[] | null = null;
+      try {
+        const rawVisits = localStorage.getItem("medtour_visits");
+        if (rawVisits) {
+          const parsed = JSON.parse(rawVisits);
+          if (Array.isArray(parsed)) {
+            if (clearOptions.allVisits) {
+              updatedVisits = parsed.filter((v: any) => v.status !== "completed");
+            } else if (selectedVisitIdsToDelete.length > 0) {
+              updatedVisits = parsed.filter((v: any) => !selectedVisitIdsToDelete.includes(v.id));
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Error filtering visits:", e);
+      }
+
+      if (updatedVisits !== null) {
+        localStorage.setItem("medtour_visits", JSON.stringify(updatedVisits));
+      }
+
+      // 3. Sync to device vault
+      try {
+        const { saveMtrRecord } = await import("@/lib/mtrDatabase");
+        await saveMtrRecord("primary-medical-id", "medical_id", "Emergency Medical ID", updated);
+        if (updatedVisits !== null) {
+          await saveMtrRecord("all_visits_ledger", "visits", "All Visits Ledger", updatedVisits);
+        }
+      } catch (e) {
+        console.warn("Vault sync warning:", e);
+      }
+
+      // 4. Notify listeners
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("medtour:mtr-restored", {
+            detail: { hasMedicalId: Boolean(updated.fullName), visitCount: updatedVisits !== null ? updatedVisits.length : undefined },
+          })
+        );
+      }
+
+      toast.success("Selected data cleared from your .mtr vault.");
+      setShowClearDataModal(false);
+    } catch (err) {
+      toast.error("Failed to clear data.");
     }
   };
 
@@ -438,18 +553,30 @@ export function QuickMedicalIdModal({ isOpen, onClose }: { isOpen: boolean; onCl
                       </Button>
                     </div>
 
-                    {/* Reset / Log Out Session Button */}
-                    <div className="pt-2 border-t border-border/60 flex items-center justify-between">
-                      <span className="text-[11px] text-muted-foreground font-medium">Clear local profile on this device</span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setShowLogoutConfirm(true)}
-                        className="h-8 px-3 rounded-xl text-xs font-bold text-destructive hover:bg-destructive/10 border-destructive/20 gap-1.5"
-                      >
-                        <FiLogOut className="h-3.5 w-3.5" />
-                        Log Out / Clear ID
-                      </Button>
+                    {/* Reset / Log Out Session Button & Clear Data Options */}
+                    <div className="pt-2 border-t border-border/60 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] text-muted-foreground font-medium">Manage records & storage</span>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setShowClearDataModal(true)}
+                          className="h-8 px-2.5 rounded-xl text-xs font-semibold text-muted-foreground hover:text-foreground border-border gap-1"
+                          title="Select specific data to remove from your .mtr vault"
+                        >
+                          <FiTrash2 className="h-3.5 w-3.5 text-amber-500" />
+                          Clear Data
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setShowLogoutConfirm(true)}
+                          className="h-8 px-2.5 rounded-xl text-xs font-bold text-destructive hover:bg-destructive/10 border-destructive/20 gap-1"
+                        >
+                          <FiLogOut className="h-3.5 w-3.5" />
+                          Log Out
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -729,63 +856,254 @@ export function QuickMedicalIdModal({ isOpen, onClose }: { isOpen: boolean; onCl
                 : "Enter the master password created with this file. Decryption is performed in-memory on your device only."}
             </p>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-foreground block">Master Password</label>
-              <div className="relative flex items-center">
+            {isDecrypting || isEncrypting ? (
+              <div className="py-6 flex flex-col items-center justify-center space-y-3 text-center animate-in fade-in">
+                <div className="relative">
+                  <div className="h-14 w-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
+                    <FiLoader className="h-7 w-7 animate-spin" />
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px]">
+                    <HiOutlineShieldCheck className="h-3.5 w-3.5" />
+                  </div>
+                </div>
+                <div>
+                  <h4 className="text-sm font-extrabold text-foreground">
+                    {isEncrypting ? "Encrypting .mtr Vault" : "Decrypting .mtr Vault"}
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {isEncrypting
+                      ? "Deriving PBKDF2 keys (250k rounds) & sealing with AES-256-GCM..."
+                      : "Deriving AES-256 keys & verifying HMAC checksum..."}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-foreground block">Master Password</label>
+                  <div className="relative flex items-center">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      autoFocus
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleConfirmPassword();
+                        }
+                      }}
+                      placeholder="Enter password (min 4 chars)..."
+                      className="w-full h-10 pl-3 pr-10 rounded-xl border border-input bg-background text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2.5 p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? (
+                        <FiEyeOff className="h-4 w-4" />
+                      ) : (
+                        <FiEye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setPasswordModalOpen(false);
+                      setPasswordInput("");
+                      setSelectedMtrFile(null);
+                      setStagedMtrContent(null);
+                      if (typeof window !== "undefined") sessionStorage.removeItem("medtour_staged_mtr");
+                    }}
+                    className="flex-1 h-10 rounded-xl font-bold text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleConfirmPassword}
+                    className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground font-bold text-xs shadow-xs"
+                  >
+                    {passwordMode === "export" ? "Encrypt & Download .mtr" : "Unlock & Import .mtr"}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Selective Clear Data Modal */}
+      {showClearDataModal && (
+        <div
+          className="fixed inset-0 z-70 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-full max-w-sm rounded-3xl bg-card border border-border p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
+                <FiTrash2 className="h-5 w-5 text-amber-500" /> Clear Vault Data
+              </h3>
+              <button
+                onClick={() => setShowClearDataModal(false)}
+                className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground"
+              >
+                <FiX className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Select which categories of data to wipe from your active medical ID and <code className="font-bold text-foreground">.mtr</code> records:
+            </p>
+
+            <div className="space-y-2.5 pt-1">
+              <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-border/80 bg-muted/20 hover:bg-muted/40 cursor-pointer select-none">
                 <input
-                  type={showPassword ? "text" : "password"}
-                  autoFocus
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleConfirmPassword();
-                    }
-                  }}
-                  placeholder="Enter password (min 4 chars)..."
-                  className="w-full h-10 pl-3 pr-10 rounded-xl border border-input bg-background text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  type="checkbox"
+                  checked={clearOptions.clinicalAlerts}
+                  onChange={(e) => setClearOptions({ ...clearOptions, clinicalAlerts: e.target.checked })}
+                  className="rounded border-input text-primary h-4 w-4"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-2.5 p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  title={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? (
-                    <FiEyeOff className="h-4 w-4" />
-                  ) : (
-                    <FiEye className="h-4 w-4" />
+                <div className="text-xs">
+                  <span className="font-bold text-foreground block">Clinical Alerts & Notes</span>
+                  <span className="text-[10px] text-muted-foreground">Allergies, chronic conditions, and medications</span>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-border/80 bg-muted/20 hover:bg-muted/40 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={clearOptions.emergencyContact}
+                  onChange={(e) => setClearOptions({ ...clearOptions, emergencyContact: e.target.checked })}
+                  className="rounded border-input text-primary h-4 w-4"
+                />
+                <div className="text-xs">
+                  <span className="font-bold text-foreground block">Emergency Contact</span>
+                  <span className="text-[10px] text-muted-foreground">Emergency contact name and phone number</span>
+                </div>
+              </label>
+
+              <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-border/80 bg-muted/20 hover:bg-muted/40 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={clearOptions.insuranceInfo}
+                  onChange={(e) => setClearOptions({ ...clearOptions, insuranceInfo: e.target.checked })}
+                  className="rounded border-input text-primary h-4 w-4"
+                />
+                <div className="text-xs">
+                  <span className="font-bold text-foreground block">Insurance Policy</span>
+                  <span className="text-[10px] text-muted-foreground">Insurance provider and policy number</span>
+                </div>
+              </label>
+
+              <div className="pt-2 border-t border-border/60">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    🏥 Completed Visits Ledger ({completedVisitsList.length})
+                  </span>
+                  {completedVisitsList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedVisitIdsToDelete.length === completedVisitsList.length) {
+                          setSelectedVisitIdsToDelete([]);
+                        } else {
+                          setSelectedVisitIdsToDelete(completedVisitsList.map((v) => v.id));
+                        }
+                      }}
+                      className="text-[10px] font-bold text-primary hover:underline"
+                    >
+                      {selectedVisitIdsToDelete.length === completedVisitsList.length
+                        ? "Deselect All"
+                        : "Select All Completed"}
+                    </button>
                   )}
-                </button>
+                </div>
+
+                {completedVisitsList.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground italic p-2 bg-muted/20 rounded-xl">
+                    No completed visits recorded in your ledger.
+                  </p>
+                ) : (
+                  <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1 divide-y divide-border/40">
+                    {completedVisitsList.map((v) => {
+                      const isChecked = selectedVisitIdsToDelete.includes(v.id);
+                      return (
+                        <label
+                          key={v.id}
+                          className={`flex items-start gap-2.5 p-2 rounded-xl border text-xs cursor-pointer transition-colors ${
+                            isChecked
+                              ? "bg-red-500/10 border-red-500/30 text-foreground"
+                              : "bg-muted/10 border-border/50 hover:bg-muted/30 text-muted-foreground"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedVisitIdsToDelete([...selectedVisitIdsToDelete, v.id]);
+                              } else {
+                                setSelectedVisitIdsToDelete(selectedVisitIdsToDelete.filter((id) => id !== v.id));
+                              }
+                            }}
+                            className="rounded border-input text-destructive mt-0.5 h-3.5 w-3.5"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold text-foreground truncate block">{v.facilityName}</span>
+                              {v.appointmentCode && (
+                                <span className="text-[9px] font-mono font-bold text-primary bg-primary/10 px-1.5 py-0.2 rounded shrink-0">
+                                  {v.appointmentCode}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground block">
+                              {new Date(v.timestamp).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="pt-2 flex gap-2">
               <Button
                 variant="outline"
-                onClick={() => {
-                  setPasswordModalOpen(false);
-                  setPasswordInput("");
-                  setSelectedMtrFile(null);
-                  setStagedMtrContent(null);
-                  if (typeof window !== "undefined") sessionStorage.removeItem("medtour_staged_mtr");
-                }}
+                onClick={() => setShowClearDataModal(false)}
                 className="flex-1 h-10 rounded-xl font-bold text-xs"
               >
                 Cancel
               </Button>
               <Button
-                onClick={handleConfirmPassword}
-                className="flex-1 h-10 rounded-xl bg-primary text-primary-foreground font-bold text-xs shadow-xs"
+                onClick={handleClearSelectedData}
+                disabled={
+                  !clearOptions.clinicalAlerts &&
+                  !clearOptions.emergencyContact &&
+                  !clearOptions.insuranceInfo &&
+                  !clearOptions.allVisits &&
+                  selectedVisitIdsToDelete.length === 0
+                }
+                className="flex-1 h-10 rounded-xl bg-destructive hover:bg-destructive/90 text-destructive-foreground font-bold text-xs shadow-xs disabled:opacity-50"
               >
-                {passwordMode === "export" ? "Encrypt & Download .mtr" : "Unlock & Import .mtr"}
+                {selectedVisitIdsToDelete.length > 0
+                  ? `Delete ${selectedVisitIdsToDelete.length} Visit${selectedVisitIdsToDelete.length > 1 ? "s" : ""}`
+                  : "Clear Selected"}
               </Button>
             </div>
           </div>
         </div>
       )}
+
       {/* Log Out / Clear ID Confirmation Dialog */}
       {showLogoutConfirm && (
         <div 

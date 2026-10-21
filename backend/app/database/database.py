@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
 import os
@@ -10,7 +10,17 @@ if os.path.exists(env_backend):
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:694200@localhost:5432/medtour_db")
 
-engine = create_engine(DATABASE_URL)
+
+def _create_engine():
+    """
+    PostgreSQL is the only supported store. `pool_pre_ping` issues a
+    lightweight liveness check on checkout so a restarted/IDLE-closed
+    connection is transparently recycled instead of failing mid-request.
+    """
+    return create_engine(DATABASE_URL, pool_pre_ping=True)
+
+
+engine = _create_engine()
 
 SessionLocal = sessionmaker(
     autocommit=False,
