@@ -25,10 +25,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_optional_current_user
 from app.database.database import get_db
 from app.models.hospital import Hospital
-from app.models.user import User
 from app.services import discovery
 from app.services.geo import haversine_km
 
@@ -198,7 +196,6 @@ def _find_nearest_emergency_hospital(
 def trigger_sos(
     req: SOSRequest,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     Curate the ambulance destination for an SOS.
@@ -208,10 +205,13 @@ def trigger_sos(
     hospital phone, and a Google Maps route from the caller's GPS. The client
     opens tel:112 alongside this call; together they let the caller summon
     help AND route it to the right hospital.
+
+    Anonymous by design — there are no patient accounts, and an SOS records no
+    identity. It knows where the caller is because that is the entire point of
+    an emergency dispatch, and nothing else.
     """
     logger.info(
-        "SOS dispatch requested by %s at (%s, %s)",
-        current_user.email if current_user else "guest",
+        "SOS dispatch requested by guest at (%s, %s)",
         req.latitude, req.longitude,
     )
 

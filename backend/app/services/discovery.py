@@ -58,10 +58,11 @@ GOOGLE_PLACES_NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby
 # Global-scope mirrors only.
 OVERPASS_INSTANCES = (
     "https://overpass-api.de/api/interpreter",
-    "https://lz4.overpass-api.de/api/interpreter",
-    "https://z.overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://z.overpass-api.de/api/interpreter",
+    "https://overpass.osm.ch/api/interpreter",
 )
 
 OVERPASS_TIMEOUT_S = 6
@@ -245,8 +246,8 @@ def query_overpass(
     query = _overpass_query(bounding_box(latitude, longitude, radius_km))
     last_error = ""
 
-    instances = OVERPASS_INSTANCES[:2] if fast else OVERPASS_INSTANCES
-    timeout_s = 3 if fast else OVERPASS_TIMEOUT_S
+    instances = OVERPASS_INSTANCES[:3] if fast else OVERPASS_INSTANCES
+    timeout = (1.5, 3.0) if fast else (2.0, float(OVERPASS_TIMEOUT_S))
 
     for instance in instances:
         try:
@@ -254,13 +255,13 @@ def query_overpass(
                 instance,
                 data={"data": query},
                 headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
-                timeout=timeout_s,
+                timeout=timeout,
             )
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:  # noqa: BLE001 - mirror failure is expected
             last_error = f"{type(exc).__name__}: {exc}"
-            logger.info("Overpass mirror %s failed: %s", instance, last_error)
+            logger.debug("Overpass mirror %s failed: %s", instance, last_error)
             continue
 
         facilities, ward_entrances = _parse_overpass(payload, latitude, longitude)
@@ -270,7 +271,7 @@ def query_overpass(
         )
         return facilities, "ok"
 
-    logger.warning("All Overpass mirrors failed. Last error: %s", last_error)
+    logger.info("Overpass mirrors unavailable (%s); falling back to local DB & alternate providers.", last_error)
     return [], "unreachable"
 
 
@@ -978,6 +979,7 @@ def discover(
             "local": "ok",
             "overpass": overpass_status,
             "geoapify": geoapify_status,
+            "google_places": google_places_status,
         },
         "stats": {
             "returned": len(results),

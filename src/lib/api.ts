@@ -15,11 +15,22 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+  // Without a timeout a hung backend leaves the caller spinning forever --
+  // and in the walk-in triage that also leaves `isAnalyzing` stuck on, which
+  // disables every button in the symptom box.
+  timeout: 30000,
 });
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("access_token");
+    // The /doctor/* namespace is the doctor portal: it authenticates with its
+    // own JWT (issued by /doctor/auth/login) so a patient token can never hit
+    // the diagnosis endpoints and vice versa.
+    const isDoctorRoute =
+      typeof config.url === "string" && config.url.startsWith("/doctor");
+    const token = isDoctorRoute
+      ? localStorage.getItem("doctor_access_token")
+      : localStorage.getItem("access_token");
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;

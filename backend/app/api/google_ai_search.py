@@ -30,9 +30,7 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_optional_current_user
 from app.database.database import get_db
-from app.models.user import User
 from app.models.curated_hospital import CuratedHospital
 from app.services import google_ai_search, rate_limit
 from app.services.hospital_ai_enricher import enrich_curated_hospital_from_ai
@@ -45,17 +43,14 @@ router = APIRouter(
 DAILY_LIMIT = int(os.getenv("GOOGLE_AI_DAILY_LIMIT", "2"))
 
 
-def user_key(request: Request, user: Optional[User]) -> str:
+def user_key(request: Request) -> str:
     """
     Opaque quota owner.
 
-    Signed-in users are stable across devices; guests fall back to a client
-    supplied device id (set by the frontend) and finally to the IP, which is
+    There are no patient accounts in this system, so the key is a
+    client-supplied device id (set by the frontend) falling back to the IP —
     the only identity an unmodified client has.
     """
-    if user is not None and getattr(user, "id", None) is not None:
-        return f"user:{user.id}"
-
     device = (request.headers.get("x-device-id") or "").strip()
     if 0 < len(device) <= 64:
         return f"device:{device}"
@@ -74,7 +69,6 @@ def google_ai_search_endpoint(
         description="What to ask Google AI about, e.g. a hospital name.",
     ),
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_optional_current_user),
 ):
     """
     One rate-limited Google AI Mode search.
@@ -91,7 +85,7 @@ def google_ai_search_endpoint(
     `usage` is always present so the UI can show "1 of 2 left today" before
     the user spends it.
     """
-    key = user_key(request, user)
+    key = user_key(request)
     snapshot = rate_limit.usage_snapshot(db, key, DAILY_LIMIT)
 
     if snapshot["remaining"] <= 0:

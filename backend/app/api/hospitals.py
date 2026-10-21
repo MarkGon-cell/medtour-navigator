@@ -4,15 +4,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user
 from app.database.database import get_db
 from app.models.hospital import Hospital
 from app.models.curated_hospital import CuratedHospital
 from app.models.hospital_availability import HospitalAvailability
-from app.models.user import User
 from app.schemas.hospital import HospitalCreate, HospitalResponse
 from app.services.geo import bounding_box, haversine_km  # noqa: F401 (re-exported)
 from app.services import discovery, hospital_search
+from app.services.insurance_tpa import resolve_insurance_tpa_profile
 
 router = APIRouter(
     prefix="/hospitals",
@@ -123,6 +122,11 @@ def _nearby_payload(
         "registration_number": hospital.registration_number,
         "tariff_range": hospital.tariff_range,
         "distance_km": round(distance_km, 2),
+        "insurance_tpa": resolve_insurance_tpa_profile(
+            hospital_name=hospital.name or "",
+            category=hospital.category or "",
+            accreditation=hospital.accreditation or "",
+        ),
     }
 
 
@@ -135,8 +139,14 @@ def create_hospital(
     hospital: HospitalCreate,
     x_hospital_write_key: str | None = Header(default=None),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
 ):
+    """
+    Directory write, gated purely on the write key.
+
+    It used to also demand a signed-in patient, but there are no patient
+    accounts in this system — the shared write key is the only gate, and it
+    was the only one that ever did any real work.
+    """
     if not HOSPITAL_WRITE_KEY:
         raise HTTPException(
             status_code=403,

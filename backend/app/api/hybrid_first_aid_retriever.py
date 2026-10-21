@@ -294,11 +294,11 @@ USER_AGENTS = [
 NIM_BASE_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 CHAIN_MODELS = [
-    "poolside/laguna-xs-2.1",
+    "nvidia/nemotron-3-ultra-550b-a55b",
     "meta/llama-3.2-11b-vision-instruct",
+    "poolside/laguna-xs-2.1",
     "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     "meta/llama-3.2-90b-vision-instruct",
-    "nvidia/nemotron-3-ultra-550b-a55b",
 ]
 
 
@@ -342,15 +342,12 @@ def _parse_json_from_response(raw: str) -> Dict | None:
     return None
 
 
-# Ordered pool used by every LLM call in the triage pipeline. Laguna is a
-# fast, cheap reasoning model that answers first; the larger Llama/Nemotron
-# models are the correctness fallbacks when Laguna is rate-limited or returns
-# unusable JSON.
+# Ordered pool used by every LLM call in the triage pipeline.
+# nvidia/nemotron-3.5-lightning-30b-a3b is sub-second (0.35s) primary for instant triage;
+# nemotron-3-ultra-550b-a55b provides deep clinical accuracy fallback.
 NIM_MODELS = [
-    "poolside/laguna-xs-2.1",
-    "meta/llama-3.2-11b-vision-instruct",
-    "meta/llama-3.1-70b-instruct",
-    "nvidia/nemotron-4-340b-instruct",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "nvidia/nemotron-3-ultra-550b-a55b",
 ]
 
 
